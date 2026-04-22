@@ -7,4 +7,3 @@ __pycache__/
 .pytest_cache/
 .vscode/
 .idea/
-requirements.txt
