@@ -1,6 +1,6 @@
-# COMP302 Term Project - InClass Platform
+# COMP302 Term Project — InClass Platform
 
-This repository contains the Software Engineering term project implementation for the InClass Platform.
+Software Engineering term project for the InClass Platform.
 
 ## Tech Stack
 - Python
@@ -13,7 +13,7 @@ This repository contains the Software Engineering term project implementation fo
 - DATABASE_URL
 
 ## Project Structure
-- `app/main.py` -> FastAPI app
-- `app/services.py` -> service layer
-- `tests/` -> team tests
-- `instructor_tests/` -> reserved for instructor tests
+- `app/main.py` — FastAPI app
+- `app/services.py` — service layer (stubs)
+- `tests/` — team tests
+- `instructor_tests/` — reserved for instructor tests
