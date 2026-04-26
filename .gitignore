@@ -8,4 +8,4 @@ __pycache__/
 .pytest_cache/
 .vscode/
 .idea/
-.resources/
+/resources/
