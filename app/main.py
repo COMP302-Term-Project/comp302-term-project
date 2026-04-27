@@ -89,6 +89,27 @@ def listMyCourses(*, email: str, password: str) -> dict[str, object]:
     from app import services
     return services.listMyCourses(email=email, password=password)
 
+# S1-T20 [US-F] Implement and route createActivity
+@app.post("/instructor/create-activity")
+def createActivity(
+    *, 
+    email: str, 
+    password: str, 
+    course_id: str, 
+    activity_text: str, 
+    learning_objectives: list[str], 
+    activity_no_optional: int | None = None
+) -> dict[str, object]:
+    from app import services
+    return services.createActivity(
+        email=email,
+        password=password,
+        course_id=course_id,
+        activity_text=activity_text,
+        learning_objectives=learning_objectives,
+        activity_no_optional=activity_no_optional
+    )
+
 # [T18] Implement and route listActivities
 @app.post("/instructor/list-activities")
 def listActivities(*, email: str, password: str, course_id: str) -> dict[str, object]:

@@ -221,7 +221,37 @@ def createActivity(
     learning_objectives: list[str],
     activity_no_optional: int | None = None
 ) -> dict[str, object]:
-    raise NotImplementedError
+    courses_check = listMyCourses(email, password)
+    if not courses_check.get("ok"):
+        return courses_check
+        
+    course_ids = [c.get("id") or c.get("course_id") for c in courses_check.get("courses", [])]
+    if course_id not in course_ids:
+        return {"ok": False, "error": "Unauthorized course access"}
+
+    db = get_db()
+    
+    if activity_no_optional is None:
+        res = db.table("activities").select("activity_no").eq("course_id", course_id).order("activity_no", desc=True).limit(1).execute()
+        if res.data:
+            activity_no = res.data[0].get("activity_no", 0) + 1
+        else:
+            activity_no = 1
+    else:
+        activity_no = activity_no_optional
+        
+    activity_data = {
+        "course_id": course_id,
+        "activity_no": activity_no,
+        "activity_text": activity_text,
+        "learning_objectives": learning_objectives
+    }
+    
+    insert_res = db.table("activities").insert(activity_data).execute()
+    
+    if insert_res.data:
+        return {"ok": True, "activity": insert_res.data[0]}
+    return {"ok": False, "error": "Failed to create activity"}
 
 
 def _verify_instructor_course_access(email: str, password: str, course_id: str) -> dict:
