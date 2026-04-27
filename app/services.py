@@ -63,16 +63,65 @@ def logScore(email: str, password: str, course_id: str, activity_no: int, score:
 
 # --- Instructor Auth APIs ---
 def instructorLogin(email: str, password: str) -> dict:
-    raise NotImplementedError
+    credentials = _validate_credentials(email, password)
+    if not credentials["ok"]:
+        return credentials
+
+    normalized_email = str(credentials["email"])
+    db = get_db()
+    auth_resp = db.table("instructors").select("id,email,full_name,password").eq("email", normalized_email).execute()
+
+    if not auth_resp.data or auth_resp.data[0].get("password") != password:
+        return {"ok": False, "error": "Invalid credentials"}
+
+    instructor = auth_resp.data[0]
+    return {
+        "ok": True,
+        "instructor": {
+            "id": instructor.get("id"),
+            "email": instructor.get("email"),
+            "full_name": instructor.get("full_name"),
+        },
+    }
 
 
 # --- Instructor Password APIs ---
 def changeInstructorPassword(email: str, password: str, old_password: str, new_password: str) -> dict:
-    raise NotImplementedError
+    normalized_email = _normalize_email(email)
+    if _is_blank(normalized_email):
+        return {"ok": False, "error": "email is required"}
+
+    if _is_blank(old_password):
+        return {"ok": False, "error": "old_password is required"}
+
+    if _is_blank(new_password):
+        return {"ok": False, "error": "new_password is required"}
+
+    # password is kept in the signature for compatibility; old_password is the current password check.
+    db = get_db()
+    auth_resp = db.table("instructors").select("password").eq("email", normalized_email).execute()
+
+    if not auth_resp.data or auth_resp.data[0].get("password") != old_password:
+        return {"ok": False, "error": "Invalid credentials"}
+
+    db.table("instructors").update({"password": new_password}).eq("email", normalized_email).execute()
+    return {"ok": True}
 
 
 def setInstructorPassword(email: str, password: str | None = None) -> dict:
-    raise NotImplementedError
+    credentials = _validate_credentials(email, password)
+    if not credentials["ok"]:
+        return credentials
+
+    normalized_email = str(credentials["email"])
+    db = get_db()
+    instructor_resp = db.table("instructors").select("id").eq("email", normalized_email).execute()
+
+    if not instructor_resp.data:
+        return {"ok": False, "error": "Instructor not found"}
+
+    db.table("instructors").update({"password": password}).eq("email", normalized_email).execute()
+    return {"ok": True}
 
 
 # --- Main APIs for Instructor ---
