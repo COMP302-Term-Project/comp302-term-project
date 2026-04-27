@@ -1,5 +1,28 @@
 from supabase import create_client, Client
 
+
+def _is_blank(value: object) -> bool:
+    return value is None or (isinstance(value, str) and value.strip() == "")
+
+
+def _normalize_email(email: str | None) -> str:
+    if email is None:
+        return ""
+    return email.strip().lower()
+
+
+def _validate_credentials(email: str | None, password: str | None) -> dict[str, object]:
+    normalized_email = _normalize_email(email)
+
+    if _is_blank(normalized_email):
+        return {"ok": False, "error": "email is required"}
+
+    if _is_blank(password):
+        return {"ok": False, "error": "password is required"}
+
+    return {"ok": True, "email": normalized_email}
+
+
 def get_db() -> Client:
     from app.config import SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
     if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
