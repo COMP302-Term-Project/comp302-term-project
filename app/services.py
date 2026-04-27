@@ -36,16 +36,64 @@ def get_db() -> Client:
 
 # --- Student Auth APIs ---
 def studentLogin(email: str, password: str) -> dict:
-    raise NotImplementedError
+    credentials = _validate_credentials(email, password)
+    if not credentials["ok"]:
+        return credentials
+
+    normalized_email = str(credentials["email"])
+    db = get_db()
+    auth_resp = db.table("students").select("id,email,full_name,password").eq("email", normalized_email).execute()
+
+    if not auth_resp.data or auth_resp.data[0].get("password") != password:
+        return {"ok": False, "error": "Invalid credentials"}
+
+    student = auth_resp.data[0]
+    return {
+        "ok": True,
+        "student": {
+            "id": student.get("id"),
+            "email": student.get("email"),
+            "full_name": student.get("full_name"),
+        },
+    }
 
 
 # --- Student Password APIs ---
 def changeStudentPassword(email: str, password: str, new_password: str, old_password: str) -> dict:
-    raise NotImplementedError
+    normalized_email = _normalize_email(email)
+    if _is_blank(normalized_email):
+        return {"ok": False, "error": "email is required"}
+
+    if _is_blank(old_password):
+        return {"ok": False, "error": "old_password is required"}
+
+    if _is_blank(new_password):
+        return {"ok": False, "error": "new_password is required"}
+
+    db = get_db()
+    auth_resp = db.table("students").select("password").eq("email", normalized_email).execute()
+
+    if not auth_resp.data or auth_resp.data[0].get("password") != old_password:
+        return {"ok": False, "error": "Invalid credentials"}
+
+    db.table("students").update({"password": new_password}).eq("email", normalized_email).execute()
+    return {"ok": True}
 
 
 def setStudentPassword(email: str, password: str) -> dict:
-    raise NotImplementedError
+    credentials = _validate_credentials(email, password)
+    if not credentials["ok"]:
+        return credentials
+
+    normalized_email = str(credentials["email"])
+    db = get_db()
+    student_resp = db.table("students").select("id").eq("email", normalized_email).execute()
+
+    if not student_resp.data:
+        return {"ok": False, "error": "Student not found"}
+
+    db.table("students").update({"password": password}).eq("email", normalized_email).execute()
+    return {"ok": True}
 
 
 # --- Main Student APIs ---
