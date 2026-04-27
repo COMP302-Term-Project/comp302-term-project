@@ -211,15 +211,24 @@ def createActivity(
     raise NotImplementedError
 
 
-# S1-T22 [US-G]
-def updateActivity(email: str, password: str, course_id: str, activity_no: int, patch: dict) -> dict:
+def _verify_instructor_course_access(email: str, password: str, course_id: str) -> dict:
+    """Verifies instructor credentials and their access to a specific course."""
     courses_check = listMyCourses(email, password)
     if not courses_check.get("ok"):
         return courses_check
         
+    # The course object might have 'id' or 'course_id' as the key depending on the call.
     course_ids = [c.get("id") or c.get("course_id") for c in courses_check.get("courses", [])]
     if course_id not in course_ids:
         return {"ok": False, "error": "Unauthorized course access"}
+
+    return {"ok": True}
+
+# S1-T22 [US-G]
+def updateActivity(email: str, password: str, course_id: str, activity_no: int, patch: dict) -> dict:
+    auth_check = _verify_instructor_course_access(email, password, course_id)
+    if not auth_check.get("ok"):
+        return auth_check
 
     if not patch:
         return {"ok": False, "error": "Empty patch rejected"}
@@ -243,15 +252,10 @@ def updateActivity(email: str, password: str, course_id: str, activity_no: int, 
     return {"ok": True, "message": "Activity updated"}
 
 
-# S1-T24 [US-H]
 def _changeActivityState(email: str, password: str, course_id: str, activity_no: int, new_state: str, allowed_previous_states: list[str]) -> dict:
-    courses_check = listMyCourses(email, password)
-    if not courses_check.get("ok"):
-        return courses_check
-
-    course_ids = [c.get("id") or c.get("course_id") for c in courses_check.get("courses", [])]
-    if course_id not in course_ids:
-        return {"ok": False, "error": "Unauthorized course access"}
+    auth_check = _verify_instructor_course_access(email, password, course_id)
+    if not auth_check.get("ok"):
+        return auth_check
 
     db = get_db()
     exist = db.table("activities").select("*").eq("course_id", course_id).eq("activity_no", activity_no).execute()
