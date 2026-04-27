@@ -1,21 +1,4 @@
 from fastapi import FastAPI
-from pydantic import BaseModel
-from typing import Dict, Any
-
-
-class AuthRequest(BaseModel):
-    email: str
-    password: str
-
-class CourseRequest(AuthRequest):
-    course_id: str
-
-class ActivityPatchRequest(CourseRequest):
-    activity_no: int
-    patch: Dict[str, Any]
-
-class ActivityStateRequest(CourseRequest):
-    activity_no: int
   
 app = FastAPI()
 
@@ -118,34 +101,53 @@ def listActivities(*, email: str, password: str, course_id: str) -> dict[str, ob
 
 # S1-T22 [US-G] - Implement and route updateActivity
 @app.post("/instructor/update-activity")
-def updateActivity(req: ActivityPatchRequest) -> dict:
+def updateActivity(
+    *, 
+    email: str, 
+    password: str, 
+    course_id: str, 
+    activity_no: int, 
+    patch: dict
+) -> dict:
     from app import services
     return services.updateActivity(
-        email=req.email, 
-        password=req.password, 
-        course_id=req.course_id,
-        activity_no=req.activity_no, 
-        patch=req.patch
+        email=email, 
+        password=password, 
+        course_id=course_id,
+        activity_no=activity_no, 
+        patch=patch
     )
 
 # S1-T24 [US-H] - Implement startActivity
 @app.post("/instructor/start-activity")
-def startActivity(req: ActivityStateRequest) -> dict:
+def startActivity(
+    *, 
+    email: str, 
+    password: str, 
+    course_id: str, 
+    activity_no: int
+) -> dict:
     from app import services
     return services.startActivity(
-        email=req.email,
-        password=req.password,
-        course_id=req.course_id,
-        activity_no=req.activity_no
+        email=email,
+        password=password,
+        course_id=course_id,
+        activity_no=activity_no
     )
 
 # S1-T24 [US-H] - Implement endActivity
 @app.post("/instructor/end-activity")
-def endActivity(req: ActivityStateRequest) -> dict:
+def endActivity(
+    *, 
+    email: str, 
+    password: str, 
+    course_id: str, 
+    activity_no: int
+) -> dict:
     from app import services
     return services.endActivity(
-        email=req.email,
-        password=req.password,
-        course_id=req.course_id,
-        activity_no=req.activity_no
+        email=email,
+        password=password,
+        course_id=course_id,
+        activity_no=activity_no
     )
