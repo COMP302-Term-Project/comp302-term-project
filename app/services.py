@@ -243,12 +243,35 @@ def updateActivity(email: str, password: str, course_id: str, activity_no: int, 
     return {"ok": True, "message": "Activity updated"}
 
 
+# S1-T24 [US-H]
+def _changeActivityState(email: str, password: str, course_id: str, activity_no: int, new_state: str, allowed_previous_states: list[str]) -> dict:
+    courses_check = listMyCourses(email, password)
+    if not courses_check.get("ok"):
+        return courses_check
+
+    course_ids = [c.get("id") or c.get("course_id") for c in courses_check.get("courses", [])]
+    if course_id not in course_ids:
+        return {"ok": False, "error": "Unauthorized course access"}
+
+    db = get_db()
+    exist = db.table("activities").select("*").eq("course_id", course_id).eq("activity_no", activity_no).execute()
+    if not exist.data:
+        return {"ok": False, "error": "Activity does not exist"}
+
+    current_state = exist.data[0].get("state")
+    if current_state not in allowed_previous_states:
+        return {"ok": False, "error": f"Invalid state transition from {current_state} to {new_state}"}
+
+    db.table("activities").update({"state": new_state}).eq("course_id", course_id).eq("activity_no", activity_no).execute()
+    return {"ok": True, "message": f"Activity state changed to {new_state}"}
+
+
 def startActivity(email: str, password: str, course_id: str, activity_no: int) -> dict:
-    raise NotImplementedError
+    return _changeActivityState(email, password, course_id, activity_no, "ACTIVE", ["NOT_STARTED"])
 
 
 def endActivity(email: str, password: str, course_id: str, activity_no: int) -> dict:
-    raise NotImplementedError
+    return _changeActivityState(email, password, course_id, activity_no, "ENDED", ["ACTIVE"])
 
 
 # --- Export API (produces csv document) ---
