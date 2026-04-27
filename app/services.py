@@ -204,11 +204,12 @@ def listActivities(email: str, password: str, course_id: str) -> dict:
     if not auth_resp.data or auth_resp.data[0].get("password") != password:
         return {"ok": False, "error": "Invalid credentials"}
         
+
     course_resp = db.table("courses").select("instructor_email").eq("course_id", course_id).execute()
     if not course_resp.data or course_resp.data[0].get("instructor_email") != email:
         return {"ok": False, "error": "Not authorized for this course"}
         
-    activities_resp = db.table("activities").select("*").eq("course_id", course_id).execute()
+    activities_resp = db.table("activities").select("*").eq("course_id", course_id).order("activity_no").execute()
     return {"ok": True, "activities": activities_resp.data}
 
 
