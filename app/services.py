@@ -1,4 +1,8 @@
+import os
+from dotenv import load_dotenv
 from supabase import create_client, Client
+
+load_dotenv()
 
 
 def _is_blank(value: object) -> bool:
@@ -24,10 +28,11 @@ def _validate_credentials(email: str | None, password: str | None) -> dict[str, 
 
 
 def get_db() -> Client:
-    from app.config import SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
-    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+    supabase_url = os.environ.get("SUPABASE_URL", "")
+    supabase_service_role_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+    if not supabase_url or not supabase_service_role_key:
         raise ValueError("Supabase environment variables are missing")
-    return create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+    return create_client(supabase_url, supabase_service_role_key)
 
 
 # ==========================================
@@ -206,15 +211,24 @@ def createActivity(
     raise NotImplementedError
 
 
-# S1-T22 [US-G]
-def updateActivity(email: str, password: str, course_id: str, activity_no: int, patch: dict) -> dict:
+def _verify_instructor_course_access(email: str, password: str, course_id: str) -> dict:
+    """Verifies instructor credentials and their access to a specific course."""
     courses_check = listMyCourses(email, password)
     if not courses_check.get("ok"):
         return courses_check
         
+    # The course object might have 'id' or 'course_id' as the key depending on the call.
     course_ids = [c.get("id") or c.get("course_id") for c in courses_check.get("courses", [])]
     if course_id not in course_ids:
         return {"ok": False, "error": "Unauthorized course access"}
+
+    return {"ok": True}
+
+# S1-T22 [US-G]
+def updateActivity(email: str, password: str, course_id: str, activity_no: int, patch: dict) -> dict:
+    auth_check = _verify_instructor_course_access(email, password, course_id)
+    if not auth_check.get("ok"):
+        return auth_check
 
     if not patch:
         return {"ok": False, "error": "Empty patch rejected"}
@@ -238,12 +252,30 @@ def updateActivity(email: str, password: str, course_id: str, activity_no: int, 
     return {"ok": True, "message": "Activity updated"}
 
 
+def _changeActivityState(email: str, password: str, course_id: str, activity_no: int, new_state: str, allowed_previous_states: list[str]) -> dict:
+    auth_check = _verify_instructor_course_access(email, password, course_id)
+    if not auth_check.get("ok"):
+        return auth_check
+
+    db = get_db()
+    exist = db.table("activities").select("*").eq("course_id", course_id).eq("activity_no", activity_no).execute()
+    if not exist.data:
+        return {"ok": False, "error": "Activity does not exist"}
+
+    current_state = exist.data[0].get("state")
+    if current_state not in allowed_previous_states:
+        return {"ok": False, "error": f"Invalid state transition from {current_state} to {new_state}"}
+
+    db.table("activities").update({"state": new_state}).eq("course_id", course_id).eq("activity_no", activity_no).execute()
+    return {"ok": True, "message": f"Activity state changed to {new_state}"}
+
+
 def startActivity(email: str, password: str, course_id: str, activity_no: int) -> dict:
-    raise NotImplementedError
+    return _changeActivityState(email, password, course_id, activity_no, "ACTIVE", ["NOT_STARTED"])
 
 
 def endActivity(email: str, password: str, course_id: str, activity_no: int) -> dict:
-    raise NotImplementedError
+    return _changeActivityState(email, password, course_id, activity_no, "ENDED", ["ACTIVE"])
 
 
 # --- Export API (produces csv document) ---
