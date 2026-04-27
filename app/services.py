@@ -1,4 +1,8 @@
+import os
+from dotenv import load_dotenv
 from supabase import create_client, Client
+
+load_dotenv()
 
 
 def _is_blank(value: object) -> bool:
@@ -24,10 +28,11 @@ def _validate_credentials(email: str | None, password: str | None) -> dict[str, 
 
 
 def get_db() -> Client:
-    from app.config import SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
-    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+    supabase_url = os.environ.get("SUPABASE_URL", "")
+    supabase_service_role_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+    if not supabase_url or not supabase_service_role_key:
         raise ValueError("Supabase environment variables are missing")
-    return create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+    return create_client(supabase_url, supabase_service_role_key)
 
 
 # ==========================================
