@@ -9,6 +9,34 @@ def root() -> dict:
 
 
 # ==========================================
+# STUDENT ROUTES
+# ==========================================
+
+# --- Student Auth APIs ---
+@app.post("/student/login")
+def studentLogin(*, email: str, password: str) -> dict:
+    from app import services
+    return services.studentLogin(email=email, password=password)
+
+
+@app.post("/student/change-password")
+def changeStudentPassword(*, email: str, password: str, new_password: str, old_password: str) -> dict:
+    from app import services
+    return services.changeStudentPassword(
+        email=email,
+        password=password,
+        new_password=new_password,
+        old_password=old_password,
+    )
+
+
+@app.post("/student/set-password")
+def setStudentPassword(*, email: str, password: str) -> dict:
+    from app import services
+    return services.setStudentPassword(email=email, password=password)
+
+
+# ==========================================
 # INSTRUCTOR ROUTES
 # ==========================================
 
