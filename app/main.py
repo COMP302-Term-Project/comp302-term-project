@@ -14,7 +14,9 @@ class ActivityPatchRequest(CourseRequest):
     activity_no: int
     patch: Dict[str, Any]
 
-
+class ActivityStateRequest(CourseRequest):
+    activity_no: int
+  
 app = FastAPI()
 
 
@@ -108,6 +110,12 @@ def createActivity(
         activity_no_optional=activity_no_optional
     )
 
+# [T18] Implement and route listActivities
+@app.post("/instructor/list-activities")
+def listActivities(*, email: str, password: str, course_id: str) -> dict[str, object]:
+    from app import services
+    return services.listActivities(email=email, password=password, course_id=course_id)
+
 # S1-T22 [US-G] - Implement and route updateActivity
 @app.post("/instructor/update-activity")
 def updateActivity(req: ActivityPatchRequest) -> dict:
@@ -118,4 +126,26 @@ def updateActivity(req: ActivityPatchRequest) -> dict:
         course_id=req.course_id,
         activity_no=req.activity_no, 
         patch=req.patch
+    )
+
+# S1-T24 [US-H] - Implement startActivity
+@app.post("/instructor/start-activity")
+def startActivity(req: ActivityStateRequest) -> dict:
+    from app import services
+    return services.startActivity(
+        email=req.email,
+        password=req.password,
+        course_id=req.course_id,
+        activity_no=req.activity_no
+    )
+
+# S1-T24 [US-H] - Implement endActivity
+@app.post("/instructor/end-activity")
+def endActivity(req: ActivityStateRequest) -> dict:
+    from app import services
+    return services.endActivity(
+        email=req.email,
+        password=req.password,
+        course_id=req.course_id,
+        activity_no=req.activity_no
     )
