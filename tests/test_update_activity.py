@@ -1,165 +1,155 @@
 from unittest.mock import patch
 
-class FakeResponse:
-    def __init__(self, data):
-        self.data = data
+from tests.fake_supabase import FakeDB
 
-class FakeQueryBuilder:
-    def __init__(self, table_name, auth_data, courses_data, activities_data):
-        self.table_name = table_name
-        self.auth_data = auth_data
-        self.courses_data = courses_data
-        self.activities_data = activities_data
 
-    def select(self, *args, **kwargs): return self
-    def update(self, *args, **kwargs): return self
-    def eq(self, column, value): return self
+def make_instructor_activity_db(activity_rows=None, mappings=None):
+    return FakeDB(
+        instructors=[
+            {
+                "id": 7,
+                "email": "test@test.com",
+                "full_name": "Test Instructor",
+                "password": "secure123",
+            }
+        ],
+        courses=[{"id": 101, "course_id": "CS101", "course_name": "Intro CS"}],
+        instructor_courses=mappings if mappings is not None else [{"id": 1, "instructor_id": 7, "course_id": 101}],
+        activities=activity_rows or [],
+    )
 
-    def execute(self):
-        if self.table_name == "instructors":
-            return FakeResponse(self.auth_data)
-        elif self.table_name == "courses":
-            return FakeResponse(self.courses_data)
-        elif self.table_name == "activities":
-            return FakeResponse(self.activities_data)
-        return FakeResponse([])
-
-class FakeDB:
-    def __init__(self, auth_data=None, courses_data=None, activities_data=None):
-        self.auth_data = auth_data or []
-        self.courses_data = courses_data or []
-        self.activities_data = activities_data or []
-
-    def table(self, name):
-        return FakeQueryBuilder(name, self.auth_data, self.courses_data, self.activities_data)
 
 def test_update_activity_success(client):
-    # 1. Arrange: Setup the fake database state
-    auth_data = [{"password": "secure123"}]
-    courses_data = [{"id": "CS101", "instructor_email": "test@test.com"}]
-    activities_data = [{"course_id": "CS101", "activity_no": 1, "state": "NOT_STARTED"}]
-    
-    fake_db = FakeDB(auth_data=auth_data, courses_data=courses_data, activities_data=activities_data)
-    
-    # 2. Act: Make a request to the FastAPI app via the test client
+    fake_db = make_instructor_activity_db(
+        activity_rows=[
+            {
+                "id": 1,
+                "course_id": 101,
+                "activity_no": 1,
+                "activity_text": "Original text",
+                "learning_objectives": ["Old"],
+                "status": "NOT_STARTED",
+            }
+        ]
+    )
+
     with patch("app.services.get_db", return_value=fake_db):
-        response = client.post("/instructor/update-activity", 
+        response = client.post(
+            "/instructor/update-activity",
             params={
                 "email": "test@test.com",
                 "password": "secure123",
                 "course_id": "CS101",
-                "activity_no": 1
+                "activity_no": 1,
             },
-            json={"activity_text": "Updated text"}
+            json={"activity_text": "Updated text"},
         )
-        
-        # 3. Assert: Verify the behavior is correct
-        assert response.status_code == 200
-        assert response.json()["ok"] is True
-        assert response.json()["message"] == "Activity updated"
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "message": "Activity updated"}
+    assert fake_db.tables["activities"][0]["activity_text"] == "Updated text"
+    assert fake_db.updates == [
+        {
+            "table": "activities",
+            "filters": {"course_id": 101, "activity_no": 1},
+            "data": {"activity_text": "Updated text"},
+        }
+    ]
+
 
 def test_update_activity_already_started(client):
-    # Arrange: Setup the activity to be in 'ACTIVE' state
-    auth_data = [{"password": "secure123"}]
-    courses_data = [{"id": "CS101", "instructor_email": "test@test.com"}]
-    activities_data = [{"course_id": "CS101", "activity_no": 1, "state": "ACTIVE"}]
-    
-    fake_db = FakeDB(auth_data=auth_data, courses_data=courses_data, activities_data=activities_data)
-    
-    # Act
+    fake_db = make_instructor_activity_db(
+        activity_rows=[{"id": 1, "course_id": 101, "activity_no": 1, "status": "ACTIVE"}]
+    )
+
     with patch("app.services.get_db", return_value=fake_db):
-        response = client.post("/instructor/update-activity", 
+        response = client.post(
+            "/instructor/update-activity",
             params={
                 "email": "test@test.com",
                 "password": "secure123",
                 "course_id": "CS101",
-                "activity_no": 1
+                "activity_no": 1,
             },
-            json={"activity_text": "Updated text"}
+            json={"activity_text": "Updated text"},
         )
-        
-        # Assert
-        assert response.json()["ok"] is False
-        assert "Cannot update activity that has started or ended" in response.json()["error"]
+
+    assert response.json() == {
+        "ok": False,
+        "error": "Cannot update activity that has started or ended",
+    }
+    assert fake_db.updates == []
+
 
 def test_update_activity_empty_patch(client):
-    auth_data = [{"password": "secure123"}]
-    courses_data = [{"id": "CS101", "instructor_email": "test@test.com"}]
-    fake_db = FakeDB(auth_data=auth_data, courses_data=courses_data, activities_data=[])
-    
+    fake_db = make_instructor_activity_db()
+
     with patch("app.services.get_db", return_value=fake_db):
-        response = client.post("/instructor/update-activity", 
+        response = client.post(
+            "/instructor/update-activity",
             params={
                 "email": "test@test.com",
                 "password": "secure123",
                 "course_id": "CS101",
-                "activity_no": 1
+                "activity_no": 1,
             },
-            json={} # Empty patch!
+            json={},
         )
-        
-        assert response.json()["ok"] is False
-        assert response.json()["error"] == "Empty patch rejected"
+
+    assert response.json() == {"ok": False, "error": "Empty patch rejected"}
+
 
 def test_update_activity_unauthorized_course(client):
-    # Arrange: The instructor owns CS101, but NOT MATH202
-    auth_data = [{"password": "secure123"}]
-    courses_data = [{"id": "CS101", "instructor_email": "test@test.com"}]
-    fake_db = FakeDB(auth_data=auth_data, courses_data=courses_data)
-    
+    fake_db = make_instructor_activity_db(mappings=[])
+
     with patch("app.services.get_db", return_value=fake_db):
-        response = client.post("/instructor/update-activity", 
+        response = client.post(
+            "/instructor/update-activity",
             params={
-                "email": "test@test.com", 
+                "email": "test@test.com",
                 "password": "secure123",
-                "course_id": "MATH202", 
-                "activity_no": 1
+                "course_id": "CS101",
+                "activity_no": 1,
             },
-            json={"activity_text": "text"}
+            json={"activity_text": "text"},
         )
-        
-        assert response.json()["ok"] is False
-        assert response.json()["error"] == "Unauthorized course access"
+
+    assert response.json() == {"ok": False, "error": "Unauthorized"}
+
 
 def test_update_activity_not_found(client):
-    auth_data = [{"password": "secure123"}]
-    courses_data = [{"id": "CS101", "instructor_email": "test@test.com"}]
-    activities_data = [] # Activity does not exist
-    
-    fake_db = FakeDB(auth_data=auth_data, courses_data=courses_data, activities_data=activities_data)
-    
+    fake_db = make_instructor_activity_db(activity_rows=[])
+
     with patch("app.services.get_db", return_value=fake_db):
-        response = client.post("/instructor/update-activity", 
+        response = client.post(
+            "/instructor/update-activity",
             params={
-                "email": "test@test.com", 
+                "email": "test@test.com",
                 "password": "secure123",
-                "course_id": "CS101", 
-                "activity_no": 999
+                "course_id": "CS101",
+                "activity_no": 999,
             },
-            json={"activity_text": "text"}
+            json={"activity_text": "text"},
         )
-        
-        assert response.json()["ok"] is False
-        assert response.json()["error"] == "Activity does not exist"
+
+    assert response.json() == {"ok": False, "error": "Activity does not exist"}
+
 
 def test_update_activity_unallowed_fields(client):
-    auth_data = [{"password": "secure123"}]
-    courses_data = [{"id": "CS101", "instructor_email": "test@test.com"}]
-    activities_data = [{"course_id": "CS101", "activity_no": 1, "state": "NOT_STARTED"}]
-    
-    fake_db = FakeDB(auth_data=auth_data, courses_data=courses_data, activities_data=activities_data)
-    
-    with patch("app.services.get_db", return_value=fake_db):
-        response = client.post("/instructor/update-activity", 
-            params={
-                "email": "test@test.com", 
-                "password": "secure123",
-                "course_id": "CS101", 
-                "activity_no": 1
-            },
-            json={"state": "ACTIVE"} # Unallowed field
-        )
-        
-        assert response.json()["ok"] is False
-        assert response.json()["error"] == "No allowed fields in patch"
+    fake_db = make_instructor_activity_db(
+        activity_rows=[{"id": 1, "course_id": 101, "activity_no": 1, "status": "NOT_STARTED"}]
+    )
 
+    with patch("app.services.get_db", return_value=fake_db):
+        response = client.post(
+            "/instructor/update-activity",
+            params={
+                "email": "test@test.com",
+                "password": "secure123",
+                "course_id": "CS101",
+                "activity_no": 1,
+            },
+            json={"status": "ACTIVE"},
+        )
+
+    assert response.json() == {"ok": False, "error": "No allowed fields in patch"}

@@ -113,7 +113,7 @@ def test_change_student_password_success(monkeypatch):
 
     response = services.changeStudentPassword(
         "student@test.com",
-        "ignored-for-compatibility",
+        "oldpass",
         "newpass",
         "oldpass",
     )
@@ -144,13 +144,38 @@ def test_change_student_password_wrong_old_password(monkeypatch):
 
     response = services.changeStudentPassword(
         "student@test.com",
-        "ignored-for-compatibility",
+        "oldpass",
         "newpass",
         "wrongold",
     )
 
     assert response["ok"] is False
     assert "error" in response
+    assert fake_db.tables["students"][0]["password"] == "oldpass"
+    assert fake_db.updates == []
+
+
+def test_change_student_password_wrong_password_parameter(monkeypatch):
+    fake_db = FakeDB(
+        students=[
+            {
+                "id": 1,
+                "email": "student@test.com",
+                "full_name": "Test Student",
+                "password": "oldpass",
+            }
+        ]
+    )
+    monkeypatch.setattr(services, "get_db", lambda: fake_db)
+
+    response = services.changeStudentPassword(
+        "student@test.com",
+        "wrong",
+        "newpass",
+        "oldpass",
+    )
+
+    assert response == {"ok": False, "error": "Invalid credentials"}
     assert fake_db.tables["students"][0]["password"] == "oldpass"
     assert fake_db.updates == []
 
@@ -184,7 +209,7 @@ def test_set_student_password_success(monkeypatch):
                 "id": 1,
                 "email": "student@test.com",
                 "full_name": "Test Student",
-                "password": "oldpass",
+                "password": "",
             }
         ]
     )
@@ -194,6 +219,26 @@ def test_set_student_password_success(monkeypatch):
 
     assert response == {"ok": True}
     assert fake_db.tables["students"][0]["password"] == "newpass"
+
+
+def test_set_student_password_rejects_existing_password(monkeypatch):
+    fake_db = FakeDB(
+        students=[
+            {
+                "id": 1,
+                "email": "student@test.com",
+                "full_name": "Test Student",
+                "password": "oldpass",
+            }
+        ]
+    )
+    monkeypatch.setattr(services, "get_db", lambda: fake_db)
+
+    response = services.setStudentPassword("student@test.com", "newpass")
+
+    assert response == {"ok": False, "error": "Password already set"}
+    assert fake_db.tables["students"][0]["password"] == "oldpass"
+    assert fake_db.updates == []
 
 
 def test_set_student_password_student_not_found(monkeypatch):
