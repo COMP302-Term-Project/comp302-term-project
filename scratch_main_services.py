@@ -311,23 +311,10 @@ def listMyCourses(email: str, password: str) -> dict:
 def listActivities(email: str, password: str, course_id: str) -> dict:
     db = get_db()
     
-    auth_resp = db.table("instructors").select("id, password").eq("email", email).execute()
+    auth_resp = db.table("instructors").select("password").eq("email", email).execute()
     if not auth_resp.data or auth_resp.data[0].get("password") != password:
         return {"ok": False, "error": "Invalid credentials"}
         
-<<<<<<< HEAD
-    instructor_id = auth_resp.data[0]["id"]
-    
-    instructor_courses_resp = db.table("instructor_courses").select("course_id").eq("instructor_id", instructor_id).execute()
-    course_ids = [row["course_id"] for row in instructor_courses_resp.data]
-    
-    if not course_ids:
-        return {"ok": True, "courses": []}
-        
-    courses_resp = db.table("courses").select("*").in_("id", course_ids).execute()
-    return {"ok": True, "courses": courses_resp.data}
-=======
->>>>>>> origin/main
 
     course_resp = db.table("courses").select("instructor_email").eq("course_id", course_id).execute()
     if not course_resp.data or course_resp.data[0].get("instructor_email") != email:
