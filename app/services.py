@@ -27,6 +27,117 @@ def _validate_credentials(email: str | None, password: str | None) -> dict[str, 
     return {"ok": True, "email": normalized_email}
 
 
+def _authenticate_instructor(db, email, password):
+    credentials = _validate_credentials(email, password)
+    if not credentials["ok"]:
+        return credentials
+
+    normalized_email = str(credentials["email"])
+    auth_resp = db.table("instructors").select("id,email,full_name,password").eq("email", normalized_email).execute()
+
+    if not auth_resp.data or auth_resp.data[0].get("password") != password:
+        return {"ok": False, "error": "Invalid credentials"}
+
+    instructor = auth_resp.data[0]
+    return {
+        "ok": True,
+        "instructor": {
+            "id": instructor.get("id"),
+            "email": instructor.get("email"),
+            "full_name": instructor.get("full_name"),
+        },
+    }
+
+
+def _authenticate_student(db, email, password):
+    credentials = _validate_credentials(email, password)
+    if not credentials["ok"]:
+        return credentials
+
+    normalized_email = str(credentials["email"])
+    auth_resp = db.table("students").select("id,email,full_name,password").eq("email", normalized_email).execute()
+
+    if not auth_resp.data or auth_resp.data[0].get("password") != password:
+        return {"ok": False, "error": "Invalid credentials"}
+
+    student = auth_resp.data[0]
+    return {
+        "ok": True,
+        "student": {
+            "id": student.get("id"),
+            "email": student.get("email"),
+            "full_name": student.get("full_name"),
+        },
+    }
+
+
+def _resolve_course(db, course_id):
+    if _is_blank(course_id):
+        return {"ok": False, "error": "Course not found"}
+
+    course_code = str(course_id).strip()
+    course_resp = db.table("courses").select("id,course_id,course_name").eq("course_id", course_code).execute()
+
+    if not course_resp.data:
+        return {"ok": False, "error": "Course not found"}
+
+    return {"ok": True, "course": course_resp.data[0]}
+
+
+def _authorize_instructor_course_access(db, identity, course_id):
+    if not identity or not identity.get("ok") or not identity.get("instructor"):
+        return {"ok": False, "error": "Invalid credentials"}
+
+    instructor = identity["instructor"]
+    if _is_blank(instructor.get("id")):
+        return {"ok": False, "error": "Invalid credentials"}
+
+    course_check = _resolve_course(db, course_id)
+    if not course_check["ok"]:
+        return course_check
+
+    course = course_check["course"]
+    access_resp = (
+        db.table("instructor_courses")
+        .select("id")
+        .eq("instructor_id", instructor["id"])
+        .eq("course_id", course["id"])
+        .execute()
+    )
+
+    if not access_resp.data:
+        return {"ok": False, "error": "Unauthorized"}
+
+    return {"ok": True, "course": course, "instructor": instructor}
+
+
+def _authorize_student_course_access(db, identity, course_id):
+    if not identity or not identity.get("ok") or not identity.get("student"):
+        return {"ok": False, "error": "Invalid credentials"}
+
+    student = identity["student"]
+    if _is_blank(student.get("id")):
+        return {"ok": False, "error": "Invalid credentials"}
+
+    course_check = _resolve_course(db, course_id)
+    if not course_check["ok"]:
+        return course_check
+
+    course = course_check["course"]
+    access_resp = (
+        db.table("student_courses")
+        .select("id")
+        .eq("student_id", student["id"])
+        .eq("course_id", course["id"])
+        .execute()
+    )
+
+    if not access_resp.data:
+        return {"ok": False, "error": "Unauthorized"}
+
+    return {"ok": True, "course": course, "student": student}
+
+
 def get_db() -> Client:
     supabase_url = os.environ.get("SUPABASE_URL", "")
     supabase_service_role_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
