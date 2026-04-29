@@ -113,7 +113,7 @@ def test_change_instructor_password_success(monkeypatch):
 
     response = services.changeInstructorPassword(
         "instructor@test.com",
-        "ignored-for-compatibility",
+        "oldpass",
         "oldpass",
         "newpass",
     )
@@ -127,6 +127,31 @@ def test_change_instructor_password_success(monkeypatch):
             "data": {"password": "newpass"},
         }
     ]
+
+
+def test_change_instructor_password_wrong_password_parameter(monkeypatch):
+    fake_db = FakeDB(
+        instructors=[
+            {
+                "id": 1,
+                "email": "instructor@test.com",
+                "full_name": "Test Instructor",
+                "password": "oldpass",
+            }
+        ]
+    )
+    monkeypatch.setattr(services, "get_db", lambda: fake_db)
+
+    response = services.changeInstructorPassword(
+        "instructor@test.com",
+        "wrong",
+        "oldpass",
+        "newpass",
+    )
+
+    assert response == {"ok": False, "error": "Invalid credentials"}
+    assert fake_db.tables["instructors"][0]["password"] == "oldpass"
+    assert fake_db.updates == []
 
 
 def test_change_instructor_password_missing_old_password():
@@ -158,7 +183,7 @@ def test_set_instructor_password_success(monkeypatch):
                 "id": 1,
                 "email": "instructor@test.com",
                 "full_name": "Test Instructor",
-                "password": "oldpass",
+                "password": None,
             }
         ]
     )
@@ -168,6 +193,26 @@ def test_set_instructor_password_success(monkeypatch):
 
     assert response == {"ok": True}
     assert fake_db.tables["instructors"][0]["password"] == "newpass"
+
+
+def test_set_instructor_password_rejects_existing_password(monkeypatch):
+    fake_db = FakeDB(
+        instructors=[
+            {
+                "id": 1,
+                "email": "instructor@test.com",
+                "full_name": "Test Instructor",
+                "password": "oldpass",
+            }
+        ]
+    )
+    monkeypatch.setattr(services, "get_db", lambda: fake_db)
+
+    response = services.setInstructorPassword("instructor@test.com", "newpass")
+
+    assert response == {"ok": False, "error": "Password already set"}
+    assert fake_db.tables["instructors"][0]["password"] == "oldpass"
+    assert fake_db.updates == []
 
 
 def test_set_instructor_password_instructor_not_found(monkeypatch):
