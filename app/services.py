@@ -206,7 +206,37 @@ def setStudentPassword(email: str, password: str) -> dict:
 
 # --- Main Student APIs ---
 def getActivity(email: str, password: str, course_id: str, activity_no: int) -> dict:
-    raise NotImplementedError
+    db = get_db()
+    identity = _authenticate_student(db, email, password)
+    if not identity["ok"]:
+        return identity
+
+    auth_check = _authorize_student_course_access(db, identity, course_id)
+    if not auth_check["ok"]:
+        return auth_check
+
+    course = auth_check["course"]
+    activity_resp = (
+        db.table("activities")
+        .select("id,course_id,activity_no,activity_text,status")
+        .eq("course_id", course["id"])
+        .eq("activity_no", activity_no)
+        .execute()
+    )
+
+    if not activity_resp.data:
+        return {"ok": False, "error": "Activity does not exist"}
+
+    activity = activity_resp.data[0]
+    if activity.get("status") != "ACTIVE":
+        return {"ok": False, "error": "Activity is not active"}
+
+    student_activity = {
+        key: activity.get(key)
+        for key in ["id", "course_id", "activity_no", "activity_text", "status"]
+        if key in activity
+    }
+    return {"ok": True, "activity": student_activity}
 
 
 def logScore(email: str, password: str, course_id: str, activity_no: int, score: float, meta: str | None = None) -> dict:
