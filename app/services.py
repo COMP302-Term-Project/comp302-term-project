@@ -233,7 +233,7 @@ def getActivity(email: str, password: str, course_id: str, activity_no: int) -> 
 
     student_activity = {
         key: activity.get(key)
-        for key in ["id", "course_id", "activity_no", "activity_text", "status"]
+        for key in ["course_id", "activity_no", "activity_text"]
         if key in activity
     }
     return {"ok": True, "activity": student_activity}
