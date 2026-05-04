@@ -36,6 +36,18 @@ def setStudentPassword(*, email: str, password: str) -> dict:
     return services.setStudentPassword(email=email, password=password)
 
 
+# --- Main Student APIs ---
+@app.post("/student/get-activity")
+def getActivity(*, email: str, password: str, course_id: str, activity_no: int) -> dict:
+    from app import services
+    return services.getActivity(
+        email=email,
+        password=password,
+        course_id=course_id,
+        activity_no=activity_no,
+    )
+
+
 # ==========================================
 # INSTRUCTOR ROUTES
 # ==========================================
