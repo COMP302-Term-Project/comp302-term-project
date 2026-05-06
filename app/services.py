@@ -207,6 +207,20 @@ def setStudentPassword(email: str, password: str) -> dict:
 # --- Main Student APIs ---
 def getActivity(email: str, password: str, course_id: str, activity_no: int) -> dict:
     db = get_db()
+    active_check = _get_active_student_activity(db, email, password, course_id, activity_no)
+    if not active_check["ok"]:
+        return active_check
+
+    activity = active_check["activity"]
+    student_activity = {
+        key: activity.get(key)
+        for key in ["course_id", "activity_no", "activity_text"]
+        if key in activity
+    }
+    return {"ok": True, "activity": student_activity}
+
+
+def _get_active_student_activity(db, email: str, password: str, course_id: str, activity_no: int) -> dict:
     identity = _authenticate_student(db, email, password)
     if not identity["ok"]:
         return identity
@@ -218,7 +232,7 @@ def getActivity(email: str, password: str, course_id: str, activity_no: int) -> 
     course = auth_check["course"]
     activity_resp = (
         db.table("activities")
-        .select("id,course_id,activity_no,activity_text,status")
+        .select("id,course_id,activity_no,activity_text,learning_objectives,status")
         .eq("course_id", course["id"])
         .eq("activity_no", activity_no)
         .execute()
@@ -231,12 +245,141 @@ def getActivity(email: str, password: str, course_id: str, activity_no: int) -> 
     if activity.get("status") != "ACTIVE":
         return {"ok": False, "error": "Activity is not active"}
 
-    student_activity = {
-        key: activity.get(key)
-        for key in ["course_id", "activity_no", "activity_text"]
-        if key in activity
+    return {
+        "ok": True,
+        "student": auth_check["student"],
+        "course": course,
+        "activity": activity,
     }
-    return {"ok": True, "activity": student_activity}
+
+
+def _normalize_conversation_history(value: object) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+
+    history = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+
+        role = item.get("role")
+        content = item.get("content")
+        if role in {"user", "assistant"} and isinstance(content, str):
+            history.append({"role": role, "content": content})
+
+    return history
+
+
+def _load_conversation_history(db, student_id: int, course_id: int, activity_no: int) -> list[dict[str, str]]:
+    state_resp = (
+        db.table("conversation_state")
+        .select("conversation_history")
+        .eq("student_id", student_id)
+        .eq("course_id", course_id)
+        .eq("activity_no", activity_no)
+        .execute()
+    )
+
+    if not state_resp.data:
+        return []
+
+    return _normalize_conversation_history(state_resp.data[0].get("conversation_history"))
+
+
+def _save_conversation_history(db, student_id: int, course_id: int, activity_no: int, history: list[dict[str, str]]) -> None:
+    db.table("conversation_state").upsert(
+        {
+            "student_id": student_id,
+            "course_id": course_id,
+            "activity_no": activity_no,
+            "conversation_history": history,
+        },
+        on_conflict="student_id,course_id,activity_no",
+    ).execute()
+
+
+def _last_assistant_response(history: list[dict[str, str]]) -> str | None:
+    for message in reversed(history):
+        if message["role"] == "assistant":
+            return message["content"]
+    return None
+
+
+def _student_turn_count(history: list[dict[str, str]]) -> int:
+    return sum(1 for message in history if message["role"] == "user")
+
+
+def _build_initial_tutoring_response(activity_text: str) -> str:
+    return (
+        f"Activity: {activity_text}\n\n"
+        "What is your initial answer in your own words?"
+    )
+
+
+def _build_followup_tutoring_response(history: list[dict[str, str]]) -> str:
+    followups = [
+        "Can you make your reasoning more specific using the important terms from the activity?",
+        "Can you explain why your answer would work in this activity situation?",
+        "Can you add one concrete detail that would make your answer more complete?",
+        "Can you connect your answer to another important idea from the activity?",
+    ]
+    turn_index = max(_student_turn_count(history) - 1, 0)
+    return followups[turn_index % len(followups)]
+
+
+def submitTutoringAnswer(
+    email: str,
+    password: str,
+    course_id: str,
+    activity_no: int,
+    answer: str | None = None,
+) -> dict:
+    db = get_db()
+    active_check = _get_active_student_activity(db, email, password, course_id, activity_no)
+    if not active_check["ok"]:
+        return active_check
+
+    student = active_check["student"]
+    course = active_check["course"]
+    activity = active_check["activity"]
+    history = _load_conversation_history(db, student["id"], course["id"], activity_no)
+
+    if not history:
+        response_text = _build_initial_tutoring_response(activity["activity_text"])
+        history.append({"role": "assistant", "content": response_text})
+        _save_conversation_history(db, student["id"], course["id"], activity_no, history)
+        return {
+            "ok": True,
+            "response": response_text,
+            "state": {
+                "student_turns": 0,
+                "assistant_turns": 1,
+            },
+        }
+
+    if _is_blank(answer):
+        return {
+            "ok": True,
+            "response": _last_assistant_response(history),
+            "state": {
+                "student_turns": _student_turn_count(history),
+                "assistant_turns": sum(1 for message in history if message["role"] == "assistant"),
+            },
+        }
+
+    history.append({"role": "user", "content": str(answer).strip()})
+    response_text = _build_followup_tutoring_response(history)
+    history.append({"role": "assistant", "content": response_text})
+    _save_conversation_history(db, student["id"], course["id"], activity_no, history)
+
+    return {
+        "ok": True,
+        "response": response_text,
+        "state": {
+            "student_turns": _student_turn_count(history),
+            "assistant_turns": sum(1 for message in history if message["role"] == "assistant"),
+        },
+    }
 
 
 def logScore(email: str, password: str, course_id: str, activity_no: int, score: float, meta: str | None = None) -> dict:
