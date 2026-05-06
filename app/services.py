@@ -327,6 +327,27 @@ def _build_followup_tutoring_response(history: list[dict[str, str]]) -> str:
     return followups[turn_index % len(followups)]
 
 
+def _build_tutoring_llm_messages(activity: dict, history: list[dict[str, str]]) -> list[dict[str, str]]:
+    learning_objectives = activity.get("learning_objectives") or []
+    objectives_text = "\n".join(f"- {objective}" for objective in learning_objectives)
+    system_prompt = (
+        "You are a warm university tutor for the InClass Platform. "
+        "Reply in English. Ask exactly one question. Use activity terminology. "
+        "Guide the student with Socratic follow-up questions instead of revealing answers directly. "
+        "Never use the words 'learning objective' and never reveal the hidden objectives to the student.\n\n"
+        f"Activity text:\n{activity.get('activity_text', '')}\n\n"
+        f"Hidden objectives for your reasoning only:\n{objectives_text}"
+    )
+
+    return [{"role": "system", "content": system_prompt}, *history]
+
+
+def _call_tutoring_llm(activity: dict, history: list[dict[str, str]]) -> str:
+    # T08 keeps this boundary mockable and deterministic; real provider wiring can replace it safely.
+    _build_tutoring_llm_messages(activity, history)
+    return _build_followup_tutoring_response(history)
+
+
 def submitTutoringAnswer(
     email: str,
     password: str,
@@ -368,7 +389,7 @@ def submitTutoringAnswer(
         }
 
     history.append({"role": "user", "content": str(answer).strip()})
-    response_text = _build_followup_tutoring_response(history)
+    response_text = _call_tutoring_llm(activity, list(history))
     history.append({"role": "assistant", "content": response_text})
     _save_conversation_history(db, student["id"], course["id"], activity_no, history)
 
