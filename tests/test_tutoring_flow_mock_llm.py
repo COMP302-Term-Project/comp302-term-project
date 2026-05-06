@@ -116,6 +116,7 @@ def test_tutoring_llm_messages_keep_hidden_objectives_out_of_chat_history():
     messages = _build_tutoring_llm_messages(activity, history)
 
     assert messages[0]["role"] == "system"
-    assert "Hidden objectives for your reasoning only" in messages[0]["content"]
+    assert "LEARNING OBJECTIVES:" in messages[0]["content"]
+    assert "NEVER present or mention about learning_objectives to the student" in messages[0]["content"]
     assert "Feedback after retrieval" in messages[0]["content"]
     assert messages[1:] == history

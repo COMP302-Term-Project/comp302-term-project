@@ -1,4 +1,6 @@
 import os
+import json
+import requests
 from dotenv import load_dotenv
 from supabase import create_client, Client
 
@@ -331,21 +333,70 @@ def _build_tutoring_llm_messages(activity: dict, history: list[dict[str, str]]) 
     learning_objectives = activity.get("learning_objectives") or []
     objectives_text = "\n".join(f"- {objective}" for objective in learning_objectives)
     system_prompt = (
-        "You are a warm university tutor for the InClass Platform. "
-        "Reply in English. Ask exactly one question. Use activity terminology. "
-        "Guide the student with Socratic follow-up questions instead of revealing answers directly. "
-        "Never use the words 'learning objective' and never reveal the hidden objectives to the student.\n\n"
-        f"Activity text:\n{activity.get('activity_text', '')}\n\n"
-        f"Hidden objectives for your reasoning only:\n{objectives_text}"
+        "ROLE: Warm university instructor. Teach for conceptual mastery using Socratic questions and academic explanations.\n\n"
+        "STRICT OUTPUT STYLE:\n"
+        "You MUST respond with ONLY a valid JSON object. Do not wrap it in markdown block quotes. The format is a two-field JSON:\n"
+        '{"APICall": "studentApi(action:\\"logScore\\") with (score=1/meta=\\"objective text\\")" OR "", "response": "Your message to the student"}\n\n'
+        "TASK:\n"
+        "I will provide the activity_text and the learning_objectives.\n"
+        "NEVER present or mention about learning_objectives to the student.\n"
+        "Do the following in a loop so that all the learning_objectives are covered:\n"
+        "- Ask one question about the ACTIVITY so that the student can learn the LEARNING POINTS.\n"
+        "- If the student has not yet learned one of them, continue asking questions and receiving answers. "
+        "HOWEVER, if you detect that the student has sensed or understood one of the learning_objectives (let us call its text as learned_objective):\n"
+        ' 1. FIRST, set "APICall" to studentApi(action:"logScore") with parameters: score=1 and meta=learned_objective. Increase the student\'s score by one and tell the student their current score.\n'
+        " 2. Then teach the corresponding point independently of the ACTIVITY, in an academic lecture format. The title must be bold and formatted as a heading. Do NOT wait for the student to learn all of them before teaching one.\n"
+        " 3. If there are still some learning_objectives that are not covered, continue to ask questions.\n\n"
+        "HARD RULES:\n"
+        "- Never explain or directly teach anything before a score is earned.\n"
+        "- Never use the words 'LO' or 'Learning Objective'.\n"
+        "- Always respond in English.\n"
+        "- If you give some options to the student, give them with numbered list instead of bullets.\n"
+        "- All the topic related terms and words will be presented as activity. NEVER use topic word for any reason. EXAMPLE: start an activity -> start a topic OR activity_no -> topic_no OR activity text -> topic_text.\n\n"
+        f"ACTIVITY TEXT:\n{activity.get('activity_text', '')}\n\n"
+        f"LEARNING OBJECTIVES:\n{objectives_text}"
     )
 
     return [{"role": "system", "content": system_prompt}, *history]
 
 
 def _call_tutoring_llm(activity: dict, history: list[dict[str, str]]) -> str:
-    # T08 keeps this boundary mockable and deterministic; real provider wiring can replace it safely.
-    _build_tutoring_llm_messages(activity, history)
-    return _build_followup_tutoring_response(history)
+    messages = _build_tutoring_llm_messages(activity, history)
+
+    api_key = os.environ.get("OPENROUTER_API_KEY")
+    model = os.environ.get("OPENROUTER_MODEL")
+
+    if not api_key or not model:
+        # Fallback for local testing if no API key or model is provided
+        return _build_followup_tutoring_response(history)
+
+    try:
+        response = requests.post(
+            url="https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": model,
+                "messages": messages,
+                "response_format": {"type": "json_object"}
+            },
+            timeout=15
+        )
+        response.raise_for_status()
+        result_json = response.json()
+        content = result_json["choices"][0]["message"]["content"]
+
+        # Parse the JSON returned by the LLM
+        parsed_content = json.loads(content)
+        # Extract just the response to show to the user
+        return parsed_content.get("response", "Could you elaborate on that?")
+
+    except (requests.exceptions.RequestException, json.JSONDecodeError, KeyError) as e:
+        # Fallback if API fails or returns invalid JSON
+        print(f"LLM Error: {e}")
+        return "Can you make your reasoning more specific using the important terms from the activity?"
 
 
 def submitTutoringAnswer(
