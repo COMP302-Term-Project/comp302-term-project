@@ -48,6 +48,25 @@ def getActivity(*, email: str, password: str, course_id: str, activity_no: int) 
     )
 
 
+@app.post("/student/submit-tutoring-answer")
+def submitTutoringAnswer(
+    *,
+    email: str,
+    password: str,
+    course_id: str,
+    activity_no: int,
+    answer: str | None = None,
+) -> dict:
+    from app import services
+    return services.submitTutoringAnswer(
+        email=email,
+        password=password,
+        course_id=course_id,
+        activity_no=activity_no,
+        answer=answer,
+    )
+
+
 # ==========================================
 # INSTRUCTOR ROUTES
 # ==========================================
