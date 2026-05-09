@@ -48,7 +48,7 @@ def test_submit_tutoring_answer_initializes_conversation_state_with_one_question
         response = submitTutoringAnswer("student@test.com", "secure123", "CS101", 1)
 
     assert response["ok"] is True
-    assert response["state"] == {"student_turns": 0, "assistant_turns": 1}
+    assert response["state"] == {"student_turns": 0, "assistant_turns": 1, "score": 0.0}
     assert response["response"].startswith("Activity: Compare active recall with rereading.")
     assert response["response"].count("?") == 1
 
@@ -89,7 +89,7 @@ def test_submit_tutoring_answer_stores_student_answer_and_returns_one_followup_q
         )
 
     assert response["ok"] is True
-    assert response["state"] == {"student_turns": 1, "assistant_turns": 2}
+    assert response["state"] == {"student_turns": 1, "assistant_turns": 2, "score": 0.0}
     assert response["response"].count("?") == 1
     assert "learning objective" not in response["response"].lower()
     assert "feedback after retrieval" not in response["response"].lower()
