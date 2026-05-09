@@ -159,3 +159,46 @@ def test_student_tutoring_route_detects_objective_and_logs_score_idempotently():
         assert response2["ok"] is True
         assert len(fake_db.tables["scores"]) == 1
         assert response2["state"]["score"] == 1.0
+
+
+def test_student_tutoring_route_handles_activity_completion_behavior():
+    initial_history = [
+        {"role": "assistant", "content": "Initial"}
+    ]
+    fake_db = _authorized_student_db(initial_history)
+    
+    # We simulate scoring the second (final) objective
+    # Score becomes 2.0. The LLM should celebrate and not ask further questions.
+    llm_response = "Congratulations! You have mastered all learning objectives. We are done!"
+    apicall = 'studentApi(action:"logScore") with parameters: score=1 and meta="Second objective"'
+    
+    # Seed the DB with the first objective already achieved
+    fake_db.tables["scores"] = [
+        {
+            "id": 999,
+            "student_id": 9,
+            "course_id": 101,
+            "activity_no": 1,
+            "score": 1.0,
+            "meta": "First objective"
+        }
+    ]
+    
+    with patch("app.services.get_db", return_value=fake_db), patch(
+        "app.services._call_tutoring_llm",
+        return_value=(llm_response, apicall),
+    ):
+        response = submitTutoringAnswer(
+            email="student@test.com",
+            password="secure123",
+            course_id="CS101",
+            activity_no=1,
+            answer="I understand the second objective.",
+        )
+        assert response["ok"] is True
+        assert len(fake_db.tables.get("scores", [])) == 2
+        assert fake_db.tables["scores"][1]["meta"] == "Second objective"
+        
+        # Activity completion behavior: score should equal the total number of objectives (2)
+        assert response["state"]["score"] == 2.0
+        assert "Congratulations" in response["response"]
