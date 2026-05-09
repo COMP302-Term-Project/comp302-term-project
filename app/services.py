@@ -455,7 +455,30 @@ def submitTutoringAnswer(
 
 
 def logScore(email: str, password: str, course_id: str, activity_no: int, score: float, meta: str | None = None) -> dict:
-    raise NotImplementedError
+    db = get_db()
+    active_check = _get_active_student_activity(db, email, password, course_id, activity_no)
+    if not active_check["ok"]:
+        return active_check
+
+    student = active_check["student"]
+    course = active_check["course"]
+
+    if score <= 0:
+        return {"ok": False, "error": "Score must be positive"}
+
+    insert_data = {
+        "student_id": student["id"],
+        "course_id": course["id"],
+        "activity_no": activity_no,
+        "score": score,
+        "meta": meta or ""
+    }
+
+    insert_res = db.table("scores").insert(insert_data).execute()
+    
+    if insert_res.data:
+        return {"ok": True, "score_log": insert_res.data[0]}
+    return {"ok": False, "error": "Failed to log score"}
 
 
 # ==========================================
