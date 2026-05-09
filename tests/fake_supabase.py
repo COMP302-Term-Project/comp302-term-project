@@ -102,6 +102,7 @@ class FakeDB:
             "student_courses": [],
             "activities": [],
             "conversation_state": [],  # S2-T05 [US-J]
+            "scores": [],
         }
         self.tables.update({name: rows for name, rows in tables.items()})
         self.inserts = []

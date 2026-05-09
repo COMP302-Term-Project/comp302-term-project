@@ -67,6 +67,27 @@ def submitTutoringAnswer(
     )
 
 
+@app.post("/student/log-score")
+def logScore(
+    *,
+    email: str,
+    password: str,
+    course_id: str,
+    activity_no: int,
+    score: float,
+    meta: str | None = None,
+) -> dict:
+    from app import services
+    return services.logScore(
+        email=email,
+        password=password,
+        course_id=course_id,
+        activity_no=activity_no,
+        score=score,
+        meta=meta,
+    )
+
+
 # ==========================================
 # INSTRUCTOR ROUTES
 # ==========================================
