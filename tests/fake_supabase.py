@@ -35,8 +35,6 @@ class FakeQueryBuilder:
         return self
 
     def upsert(self, data, on_conflict=None):
-        # For FakeDB: treat upsert as an insert/update by on_conflict column(s).
-        # We store in insert_data and let execute() handle it.
         self.insert_data = dict(data)
         self._upsert_on_conflict = on_conflict
         return self
@@ -49,7 +47,6 @@ class FakeQueryBuilder:
         rows = self.db.tables.setdefault(self.table_name, [])
 
         if self.insert_data is not None:
-            # Handle upsert: if on_conflict columns are set, update existing row
             on_conflict = getattr(self, "_upsert_on_conflict", None)
             if on_conflict:
                 conflict_cols = [c.strip() for c in on_conflict.split(",")]
@@ -92,6 +89,17 @@ class FakeQueryBuilder:
         return FakeResponse(matched_rows)
 
 
+class FakeRpcBuilder:
+    def __init__(self, db, fn_name, params):
+        self.db = db
+        self.fn_name = fn_name
+        self.params = params
+
+    def execute(self):
+        self.db.rpc_calls.append({"fn": self.fn_name, "params": dict(self.params)})
+        return FakeResponse([{"ok": True}])
+
+
 class FakeDB:
     def __init__(self, **tables):
         self.tables = {
@@ -101,12 +109,16 @@ class FakeDB:
             "instructor_courses": [],
             "student_courses": [],
             "activities": [],
-            "conversation_state": [],  # S2-T05 [US-J]
+            "conversation_state": [],
             "scores": [],
         }
         self.tables.update({name: rows for name, rows in tables.items()})
         self.inserts = []
         self.updates = []
+        self.rpc_calls = []
 
     def table(self, name):
         return FakeQueryBuilder(self, name)
+
+    def rpc(self, fn_name, params):
+        return FakeRpcBuilder(self, fn_name, params)
