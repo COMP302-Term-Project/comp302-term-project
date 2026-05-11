@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import requests
 from dotenv import load_dotenv
@@ -360,7 +361,19 @@ def _build_tutoring_llm_messages(activity: dict, history: list[dict[str, str]]) 
     return [{"role": "system", "content": system_prompt}, *history]
 
 
-def _call_tutoring_llm(activity: dict, history: list[dict[str, str]]) -> str:
+def _extract_log_score_meta(apicall: str) -> str | None:
+    if not apicall or "logScore" not in apicall:
+        return None
+    match = re.search(r'meta=\\?["\'](.*?)\\?["\']', apicall)
+    if match:
+        return match.group(1)
+    match = re.search(r'meta=([^)\n]+)', apicall)
+    if match:
+        return match.group(1).strip()
+    return None
+
+
+def _call_tutoring_llm(activity: dict, history: list[dict[str, str]]) -> tuple[str, str]:
     messages = _build_tutoring_llm_messages(activity, history)
 
     api_key = os.environ.get("OPENROUTER_API_KEY")
@@ -368,7 +381,7 @@ def _call_tutoring_llm(activity: dict, history: list[dict[str, str]]) -> str:
 
     if not api_key or not model:
         # Fallback for local testing if no API key or model is provided
-        return _build_followup_tutoring_response(history)
+        return _build_followup_tutoring_response(history), ""
 
     try:
         response = requests.post(
@@ -390,13 +403,13 @@ def _call_tutoring_llm(activity: dict, history: list[dict[str, str]]) -> str:
 
         # Parse the JSON returned by the LLM
         parsed_content = json.loads(content)
-        # Extract just the response to show to the user
-        return parsed_content.get("response", "Could you elaborate on that?")
+        # Extract the response and the APICall
+        return parsed_content.get("response", "Could you elaborate on that?"), parsed_content.get("APICall", "")
 
     except (requests.exceptions.RequestException, json.JSONDecodeError, KeyError) as e:
         # Fallback if API fails or returns invalid JSON
         print(f"LLM Error: {e}")
-        return "Can you make your reasoning more specific using the important terms from the activity?"
+        return "Can you make your reasoning more specific using the important terms from the activity?", ""
 
 
 def submitTutoringAnswer(
@@ -440,7 +453,14 @@ def submitTutoringAnswer(
         }
 
     history.append({"role": "user", "content": str(answer).strip()})
-    response_text = _call_tutoring_llm(activity, list(history))
+    response_text, apicall = _call_tutoring_llm(activity, list(history))
+    
+    meta = _extract_log_score_meta(apicall)
+    if meta:
+        existing_score = db.table("scores").select("id").eq("student_id", student["id"]).eq("course_id", course["id"]).eq("activity_no", activity_no).eq("meta", meta).execute()
+        if not existing_score.data:
+            logScore(email, password, course["course_id"], activity_no, 1.0, meta)
+            
     history.append({"role": "assistant", "content": response_text})
     _save_conversation_history(db, student["id"], course["id"], activity_no, history)
 
