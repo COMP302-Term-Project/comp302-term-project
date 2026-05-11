@@ -301,6 +301,11 @@ def _save_conversation_history(db, student_id: int, course_id: int, activity_no:
     ).execute()
 
 
+def _get_student_score(db, student_id: int, course_id: int, activity_no: int) -> float:
+    scores_resp = db.table("scores").select("score").eq("student_id", student_id).eq("course_id", course_id).eq("activity_no", activity_no).execute()
+    return sum(record.get("score", 0.0) for record in scores_resp.data) if scores_resp.data else 0.0
+
+
 def _last_assistant_response(history: list[dict[str, str]]) -> str | None:
     for message in reversed(history):
         if message["role"] == "assistant":
@@ -330,7 +335,7 @@ def _build_followup_tutoring_response(history: list[dict[str, str]]) -> str:
     return followups[turn_index % len(followups)]
 
 
-def _build_tutoring_llm_messages(activity: dict, history: list[dict[str, str]]) -> list[dict[str, str]]:
+def _build_tutoring_llm_messages(activity: dict, history: list[dict[str, str]], current_score: float = 0.0) -> list[dict[str, str]]:
     learning_objectives = activity.get("learning_objectives") or []
     objectives_text = "\n".join(f"- {objective}" for objective in learning_objectives)
     system_prompt = (
@@ -355,7 +360,8 @@ def _build_tutoring_llm_messages(activity: dict, history: list[dict[str, str]]) 
         "- If you give some options to the student, give them with numbered list instead of bullets.\n"
         "- All the topic related terms and words will be presented as activity. NEVER use topic word for any reason. EXAMPLE: start an activity -> start a topic OR activity_no -> topic_no OR activity text -> topic_text.\n\n"
         f"ACTIVITY TEXT:\n{activity.get('activity_text', '')}\n\n"
-        f"LEARNING OBJECTIVES:\n{objectives_text}"
+        f"LEARNING OBJECTIVES:\n{objectives_text}\n\n"
+        f"CURRENT SCORE: {current_score}"
     )
 
     return [{"role": "system", "content": system_prompt}, *history]
@@ -372,9 +378,8 @@ def _extract_log_score_meta(apicall: str) -> str | None:
         return match.group(1).strip()
     return None
 
-
-def _call_tutoring_llm(activity: dict, history: list[dict[str, str]]) -> tuple[str, str]:
-    messages = _build_tutoring_llm_messages(activity, history)
+def _call_tutoring_llm(activity: dict, history: list[dict[str, str]], current_score: float = 0.0) -> tuple[str, str]:
+    messages = _build_tutoring_llm_messages(activity, history, current_score)
 
     api_key = os.environ.get("OPENROUTER_API_KEY")
     model = os.environ.get("OPENROUTER_MODEL")
@@ -428,6 +433,7 @@ def submitTutoringAnswer(
     course = active_check["course"]
     activity = active_check["activity"]
     history = _load_conversation_history(db, student["id"], course["id"], activity_no)
+    current_score = _get_student_score(db, student["id"], course["id"], activity_no)
 
     if not history:
         response_text = _build_initial_tutoring_response(activity["activity_text"])
@@ -439,6 +445,7 @@ def submitTutoringAnswer(
             "state": {
                 "student_turns": 0,
                 "assistant_turns": 1,
+                "score": current_score,
             },
         }
 
@@ -449,17 +456,19 @@ def submitTutoringAnswer(
             "state": {
                 "student_turns": _student_turn_count(history),
                 "assistant_turns": sum(1 for message in history if message["role"] == "assistant"),
+                "score": current_score,
             },
         }
 
     history.append({"role": "user", "content": str(answer).strip()})
-    response_text, apicall = _call_tutoring_llm(activity, list(history))
+    response_text, apicall = _call_tutoring_llm(activity, list(history), current_score)
     
     meta = _extract_log_score_meta(apicall)
     if meta:
         existing_score = db.table("scores").select("id").eq("student_id", student["id"]).eq("course_id", course["id"]).eq("activity_no", activity_no).eq("meta", meta).execute()
         if not existing_score.data:
             logScore(email, password, course["course_id"], activity_no, 1.0, meta)
+            current_score += 1.0
             
     history.append({"role": "assistant", "content": response_text})
     _save_conversation_history(db, student["id"], course["id"], activity_no, history)
@@ -470,6 +479,7 @@ def submitTutoringAnswer(
         "state": {
             "student_turns": _student_turn_count(history),
             "assistant_turns": sum(1 for message in history if message["role"] == "assistant"),
+            "score": current_score,
         },
     }
 

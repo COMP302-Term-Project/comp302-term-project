@@ -13,7 +13,7 @@ def test_student_submit_tutoring_answer_route_forwards_response_unchanged():
     service_response = {
         "ok": True,
         "response": "Can you make your reasoning more specific using the important terms from the activity?",
-        "state": {"student_turns": 1, "assistant_turns": 2},
+        "state": {"student_turns": 1, "assistant_turns": 2, "score": 0.0},
     }
 
     with patch("app.services.submitTutoringAnswer", return_value=service_response) as submit_tutoring_answer:
@@ -39,7 +39,7 @@ def test_student_submit_tutoring_answer_route_allows_initial_turn_without_answer
     service_response = {
         "ok": True,
         "response": "Activity: Compare active recall with rereading.\n\nWhat is your initial answer in your own words?",
-        "state": {"student_turns": 0, "assistant_turns": 1},
+        "state": {"student_turns": 0, "assistant_turns": 1, "score": 0.0},
     }
 
     with patch("app.services.submitTutoringAnswer", return_value=service_response) as submit_tutoring_answer:

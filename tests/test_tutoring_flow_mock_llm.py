@@ -74,14 +74,14 @@ def test_student_tutoring_route_uses_mock_llm_response_and_persists_history():
     assert response == {
         "ok": True,
         "response": llm_response,
-        "state": {"student_turns": 1, "assistant_turns": 2},
+        "state": {"student_turns": 1, "assistant_turns": 2, "score": 0.0},
     }
     assert response["response"].count("?") == 1
     assert "learning objective" not in response["response"].lower()
     assert "feedback after retrieval" not in response["response"].lower()
 
     call_tutoring_llm.assert_called_once()
-    activity_arg, history_arg = call_tutoring_llm.call_args.args
+    activity_arg, history_arg, score_arg = call_tutoring_llm.call_args.args
     assert activity_arg["activity_text"] == "Compare active recall with rereading."
     assert activity_arg["learning_objectives"] == _activity_row()["learning_objectives"]
     assert history_arg[-1] == {
@@ -135,7 +135,7 @@ def test_student_tutoring_route_detects_objective_and_logs_score_idempotently():
         "app.services._call_tutoring_llm",
         return_value=(llm_response, apicall),
     ):
-        # First call should log the score
+        # First call should log the score and return score = 1.0
         response1 = submitTutoringAnswer(
             email="student@test.com",
             password="secure123",
@@ -146,8 +146,9 @@ def test_student_tutoring_route_detects_objective_and_logs_score_idempotently():
         assert response1["ok"] is True
         assert len(fake_db.tables.get("scores", [])) == 1
         assert fake_db.tables["scores"][0]["meta"] == "Hidden instructor objective"
+        assert response1["state"]["score"] == 1.0
         
-        # Second call with SAME objective should NOT log a new score (idempotent)
+        # Second call with SAME objective should NOT log a new score (idempotent), score remains 1.0
         response2 = submitTutoringAnswer(
             email="student@test.com",
             password="secure123",
@@ -157,3 +158,4 @@ def test_student_tutoring_route_detects_objective_and_logs_score_idempotently():
         )
         assert response2["ok"] is True
         assert len(fake_db.tables["scores"]) == 1
+        assert response2["state"]["score"] == 1.0
