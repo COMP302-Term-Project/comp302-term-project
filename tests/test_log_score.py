@@ -34,7 +34,7 @@ def _authorized_student_db(activity_rows=None):
         courses=[_course_row()],
         student_courses=[{"id": 1, "student_id": 9, "course_id": 101}],
         activities=activity_rows or [],
-        scores=[]
+        score_logs=[]
     )
 
 
@@ -60,8 +60,8 @@ def test_log_score_success():
     assert response["score_log"]["meta"] == "learned_objective"
     
     # Verify it was inserted in fake_db
-    assert len(fake_db.tables["scores"]) == 1
-    saved_score = fake_db.tables["scores"][0]
+    assert len(fake_db.tables["score_logs"]) == 1
+    saved_score = fake_db.tables["score_logs"][0]
     assert saved_score["score"] == 1.0
     assert saved_score["meta"] == "learned_objective"
 
@@ -80,7 +80,8 @@ def test_log_score_invalid_score():
         )
 
     assert response == {"ok": False, "error": "Score must be positive"}
-    assert len(fake_db.tables["scores"]) == 0
+    assert len(fake_db.tables["score_logs"]) == 0
+
 
 
 def test_log_score_inactive_activity():
@@ -97,7 +98,7 @@ def test_log_score_inactive_activity():
         )
 
     assert response == {"ok": False, "error": "Activity is not active"}
-    assert len(fake_db.tables["scores"]) == 0
+    assert len(fake_db.tables["score_logs"]) == 0
 
 
 def test_log_score_unauthorized_student():
@@ -106,7 +107,7 @@ def test_log_score_unauthorized_student():
         courses=[_course_row()],
         student_courses=[], # Not enrolled
         activities=[_activity_row(status="ACTIVE")],
-        scores=[]
+        score_logs=[]
     )
 
     with patch("app.services.get_db", return_value=fake_db):
@@ -120,4 +121,4 @@ def test_log_score_unauthorized_student():
         )
 
     assert response == {"ok": False, "error": "Unauthorized"}
-    assert len(fake_db.tables["scores"]) == 0
+    assert len(fake_db.tables["score_logs"]) == 0

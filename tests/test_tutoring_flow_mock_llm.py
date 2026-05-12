@@ -144,8 +144,8 @@ def test_student_tutoring_route_detects_objective_and_logs_score_idempotently():
             answer="I understand the objective.",
         )
         assert response1["ok"] is True
-        assert len(fake_db.tables.get("scores", [])) == 1
-        assert fake_db.tables["scores"][0]["meta"] == "Hidden instructor objective"
+        assert len(fake_db.tables.get("score_logs", [])) == 1
+        assert fake_db.tables["score_logs"][0]["meta"] == "Hidden instructor objective"
         assert response1["state"]["score"] == 1.0
         
         # Second call with SAME objective should NOT log a new score (idempotent), score remains 1.0
@@ -157,7 +157,7 @@ def test_student_tutoring_route_detects_objective_and_logs_score_idempotently():
             answer="I still understand it.",
         )
         assert response2["ok"] is True
-        assert len(fake_db.tables["scores"]) == 1
+        assert len(fake_db.tables["score_logs"]) == 1
         assert response2["state"]["score"] == 1.0
 
 
@@ -173,7 +173,7 @@ def test_student_tutoring_route_handles_activity_completion_behavior():
     apicall = 'studentApi(action:"logScore") with parameters: score=1 and meta="Second objective"'
     
     # Seed the DB with the first objective already achieved
-    fake_db.tables["scores"] = [
+    fake_db.tables["score_logs"] = [
         {
             "id": 999,
             "student_id": 9,
@@ -196,8 +196,8 @@ def test_student_tutoring_route_handles_activity_completion_behavior():
             answer="I understand the second objective.",
         )
         assert response["ok"] is True
-        assert len(fake_db.tables.get("scores", [])) == 2
-        assert fake_db.tables["scores"][1]["meta"] == "Second objective"
+        assert len(fake_db.tables.get("score_logs", [])) == 2
+        assert fake_db.tables["score_logs"][1]["meta"] == "Second objective"
         
         # Activity completion behavior: score should equal the total number of objectives (2)
         assert response["state"]["score"] == 2.0

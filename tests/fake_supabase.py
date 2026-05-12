@@ -110,7 +110,7 @@ class FakeDB:
             "student_courses": [],
             "activities": [],
             "conversation_state": [],
-            "scores": [],
+            "score_logs": [],
         }
         self.tables.update({name: rows for name, rows in tables.items()})
         self.inserts = []
