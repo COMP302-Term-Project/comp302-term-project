@@ -302,7 +302,7 @@ def _save_conversation_history(db, student_id: int, course_id: int, activity_no:
 
 
 def _get_student_score(db, student_id: int, course_id: int, activity_no: int) -> float:
-    scores_resp = db.table("scores").select("score").eq("student_id", student_id).eq("course_id", course_id).eq("activity_no", activity_no).execute()
+    scores_resp = db.table("score_logs").select("score").eq("student_id", student_id).eq("course_id", course_id).eq("activity_no", activity_no).execute()
     return sum(record.get("score", 0.0) for record in scores_resp.data) if scores_resp.data else 0.0
 
 
@@ -465,7 +465,7 @@ def submitTutoringAnswer(
     
     meta = _extract_log_score_meta(apicall)
     if meta:
-        existing_score = db.table("scores").select("id").eq("student_id", student["id"]).eq("course_id", course["id"]).eq("activity_no", activity_no).eq("meta", meta).execute()
+        existing_score = db.table("score_logs").select("id").eq("student_id", student["id"]).eq("course_id", course["id"]).eq("activity_no", activity_no).eq("meta", meta).execute()
         if not existing_score.data:
             logScore(email, password, course["course_id"], activity_no, 1.0, meta)
             current_score += 1.0
@@ -504,7 +504,7 @@ def logScore(email: str, password: str, course_id: str, activity_no: int, score:
         "meta": meta or ""
     }
 
-    insert_res = db.table("scores").insert(insert_data).execute()
+    insert_res = db.table("score_logs").insert(insert_data).execute()
     
     if insert_res.data:
         return {"ok": True, "score_log": insert_res.data[0]}
