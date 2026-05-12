@@ -740,3 +740,64 @@ def resetActivity(email: str, password: str, course_id: str, activity_no: int) -
 # --- Student Password Reset API ---
 def resetStudentPassword(email: str, password: str, course_id: str, student_email: str, new_password: str) -> dict:
     raise NotImplementedError
+# --- Manual Grading API ---
+def manualGradeStudent(
+    email: str,
+    password: str,
+    course_id: str,
+    student_id: int,
+    activity_no: int,
+    score: float,
+    reason: str
+) -> dict:
+
+    # instructor authorization check
+    auth_check = _verify_instructor_course_access(email, password, course_id)
+
+    if not auth_check.get("ok"):
+        return auth_check
+
+    # score validation
+    if score <= 0:
+        return {"ok": False, "error": "Score must be positive"}
+
+    if _is_blank(reason):
+        return {"ok": False, "error": "reason is required"}
+
+    db = get_db()
+    course = auth_check["course"]
+
+    # activity existence check
+    activity_resp = (
+        db.table("activities")
+        .select("id,status")
+        .eq("course_id", course["id"])
+        .eq("activity_no", activity_no)
+        .execute()
+    )
+
+    if not activity_resp.data:
+        return {"ok": False, "error": "Activity does not exist"}
+
+    activity = activity_resp.data[0]
+
+    # only ACTIVE activities can be graded
+    if activity.get("status") != "ACTIVE":
+        return {"ok": False, "error": "Activity is not active"}
+
+    # call database function
+    db.rpc(
+        "log_manual_grade",
+        {
+            "p_student_id": student_id,
+            "p_activity_id": activity["id"],
+            "p_instructor_id": auth_check["instructor"]["id"],
+            "p_score": score,
+            "p_reason": reason
+        }
+    ).execute()
+
+    return {
+        "ok": True,
+        "message": "Manual grade logged successfully"
+    }

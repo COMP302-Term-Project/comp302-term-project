@@ -203,3 +203,48 @@ def endActivity(
         course_id=course_id,
         activity_no=activity_no
     )
+
+# S2-T14 [US-L] - Implement and route manualGradeStudent
+@app.post("/instructor/manual-grade")
+def manualGradeStudent(
+    *,
+    email: str,
+    password: str,
+    course_id: str,
+    student_id: int,
+    activity_no: int,
+    score: float,
+    reason: str,
+) -> dict:
+    from app import services
+    return services.manualGradeStudent(
+        email=email,
+        password=password,
+        course_id=course_id,
+        student_id=student_id,
+        activity_no=activity_no,
+        score=score,
+        reason=reason,
+    )
+# S2-T14 [US-L] - Implement and route manualGradeStudent
+@app.post("/instructor/manual-grade")
+def manualGradeStudent(
+    *,
+    email: str,
+    password: str,
+    course_id: str,
+    student_id: int,
+    activity_no: int,
+    score: float,
+    reason: str,
+) -> dict:
+    from app import services
+    return services.manualGradeStudent(
+        email=email,
+        password=password,
+        course_id=course_id,
+        student_id=student_id,
+        activity_no=activity_no,
+        score=score,
+        reason=reason,
+    )
