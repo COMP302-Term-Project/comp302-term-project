@@ -1,6 +1,8 @@
+import csv
+import io
+import json
 import os
 import re
-import json
 import requests
 from dotenv import load_dotenv
 from supabase import create_client, Client
@@ -742,7 +744,68 @@ def _cleanup_activity_runtime_state(db, course_db_id: int, activity_no: int) -> 
 
 # --- Export API (produces csv document) ---
 def exportScores(email: str, password: str, course_id: str, activity_no: int) -> dict:
-    raise NotImplementedError
+    db = get_db()
+    identity = _authenticate_instructor(db, email, password)
+    if not identity["ok"]:
+        return identity
+
+    auth_check = _authorize_instructor_course_access(db, identity, course_id)
+    if not auth_check["ok"]:
+        return auth_check
+
+    course = auth_check["course"]
+    activity_resp = (
+        db.table("activities")
+        .select("id")
+        .eq("course_id", course["id"])
+        .eq("activity_no", activity_no)
+        .execute()
+    )
+    if not activity_resp.data:
+        return {"ok": False, "error": "Activity does not exist"}
+
+    score_resp = (
+        db.table("score_logs")
+        .select("*")
+        .eq("course_id", course["id"])
+        .eq("activity_no", activity_no)
+        .order("student_id")
+        .execute()
+    )
+    student_resp = db.table("students").select("id,email,full_name").execute()
+    students_by_id = {
+        student.get("id"): student
+        for student in (student_resp.data or [])
+    }
+
+    fieldnames = [
+        "student_id",
+        "student_email",
+        "student_full_name",
+        "course_id",
+        "activity_no",
+        "score",
+        "meta",
+        "created_at",
+    ]
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=fieldnames, lineterminator="\n")
+    writer.writeheader()
+
+    for score_log in score_resp.data or []:
+        student = students_by_id.get(score_log.get("student_id"), {})
+        writer.writerow({
+            "student_id": score_log.get("student_id", ""),
+            "student_email": student.get("email", ""),
+            "student_full_name": student.get("full_name", ""),
+            "course_id": course.get("course_id", course_id),
+            "activity_no": score_log.get("activity_no", activity_no),
+            "score": score_log.get("score", ""),
+            "meta": score_log.get("meta", ""),
+            "created_at": score_log.get("created_at", ""),
+        })
+
+    return {"ok": True, "csv": output.getvalue()}
 
 
 # --- Reset API (deletes all scores for given activity_no) ---
@@ -764,7 +827,47 @@ def resetActivity(email: str, password: str, course_id: str, activity_no: int) -
 
 # --- Student Password Reset API ---
 def resetStudentPassword(email: str, password: str, course_id: str, student_email: str, new_password: str) -> dict:
-    raise NotImplementedError
+    if _is_blank(student_email):
+        return {"ok": False, "error": "student_email is required"}
+
+    if _is_blank(new_password):
+        return {"ok": False, "error": "new_password is required"}
+
+    db = get_db()
+    identity = _authenticate_instructor(db, email, password)
+    if not identity["ok"]:
+        return identity
+
+    auth_check = _authorize_instructor_course_access(db, identity, course_id)
+    if not auth_check["ok"]:
+        return auth_check
+
+    normalized_student_email = _normalize_email(student_email)
+    student_resp = (
+        db.table("students")
+        .select("id,email")
+        .eq("email", normalized_student_email)
+        .execute()
+    )
+    if not student_resp.data:
+        return {"ok": False, "error": "Student not found"}
+
+    course = auth_check["course"]
+    student = student_resp.data[0]
+    enrollment_resp = (
+        db.table("student_courses")
+        .select("id")
+        .eq("student_id", student["id"])
+        .eq("course_id", course["id"])
+        .execute()
+    )
+    if not enrollment_resp.data:
+        return {"ok": False, "error": "Student is not enrolled in this course"}
+
+    db.table("students").update({"password": new_password}).eq("id", student["id"]).execute()
+    return {"ok": True, "message": "Student password reset"}
+
+
 # --- Manual Grading API ---
 def manualGradeStudent(
     email: str,

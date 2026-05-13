@@ -221,6 +221,43 @@ def resetActivity(
         activity_no=activity_no,
     )
 
+
+@app.post("/instructor/export-scores")
+def exportScores(
+    *,
+    email: str,
+    password: str,
+    course_id: str,
+    activity_no: int,
+) -> dict:
+    from app import services
+    return services.exportScores(
+        email=email,
+        password=password,
+        course_id=course_id,
+        activity_no=activity_no,
+    )
+
+
+@app.post("/instructor/reset-student-password")
+def resetStudentPassword(
+    *,
+    email: str,
+    password: str,
+    course_id: str,
+    student_email: str,
+    new_password: str,
+) -> dict:
+    from app import services
+    return services.resetStudentPassword(
+        email=email,
+        password=password,
+        course_id=course_id,
+        student_email=student_email,
+        new_password=new_password,
+    )
+
+
 # S2-T14 [US-L] - Implement and route manualGradeStudent
 @app.post("/instructor/manual-grade")
 def manualGradeStudent(
