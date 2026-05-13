@@ -1,13 +1,21 @@
 import csv
+import base64
+import binascii
+import hashlib
+import hmac
 import io
 import json
 import os
 import re
 import requests
+import time
 from dotenv import load_dotenv
 from supabase import create_client, Client
 
 load_dotenv()
+
+GOOGLE_SESSION_TOKEN_PREFIX = "google_session"
+GOOGLE_SESSION_TTL_SECONDS = 60 * 60 * 8
 
 
 def _is_blank(value: object) -> bool:
@@ -18,6 +26,13 @@ def _normalize_email(email: str | None) -> str:
     if email is None:
         return ""
     return email.strip().lower()
+
+
+def _normalize_role(role: str | None) -> str | None:
+    if role is None:
+        return None
+    normalized_role = str(role).strip().lower()
+    return normalized_role or None
 
 
 def _validate_credentials(email: str | None, password: str | None) -> dict[str, object]:
@@ -32,6 +47,162 @@ def _validate_credentials(email: str | None, password: str | None) -> dict[str, 
     return {"ok": True, "email": normalized_email}
 
 
+def _base64url_encode(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
+
+
+def _base64url_decode(value: str) -> bytes:
+    padding = "=" * (-len(value) % 4)
+    return base64.urlsafe_b64decode(value + padding)
+
+
+def _google_session_secret() -> str:
+    return os.environ.get("GOOGLE_AUTH_SESSION_SECRET") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+
+
+def _issue_google_session_token(email: str, role: str) -> str:
+    secret = _google_session_secret()
+    if _is_blank(secret):
+        raise ValueError("Google auth session secret is missing")
+
+    now = int(time.time())
+    payload = {
+        "email": _normalize_email(email),
+        "role": role,
+        "iat": now,
+        "exp": now + GOOGLE_SESSION_TTL_SECONDS,
+    }
+    payload_json = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    encoded_payload = _base64url_encode(payload_json)
+    signature = hmac.new(secret.encode("utf-8"), encoded_payload.encode("ascii"), hashlib.sha256).digest()
+    return f"{GOOGLE_SESSION_TOKEN_PREFIX}.{encoded_payload}.{_base64url_encode(signature)}"
+
+
+def _verify_google_session_token(token: str | None, email: str, role: str) -> dict[str, object]:
+    if _is_blank(token) or not str(token).startswith(f"{GOOGLE_SESSION_TOKEN_PREFIX}."):
+        return {"ok": False, "error": "Invalid credentials"}
+
+    secret = _google_session_secret()
+    if _is_blank(secret):
+        return {"ok": False, "error": "Invalid credentials"}
+
+    parts = str(token).split(".")
+    if len(parts) != 3:
+        return {"ok": False, "error": "Invalid credentials"}
+
+    _, encoded_payload, encoded_signature = parts
+    expected_signature = hmac.new(secret.encode("utf-8"), encoded_payload.encode("ascii"), hashlib.sha256).digest()
+    if not hmac.compare_digest(_base64url_encode(expected_signature), encoded_signature):
+        return {"ok": False, "error": "Invalid credentials"}
+
+    try:
+        payload = json.loads(_base64url_decode(encoded_payload).decode("utf-8"))
+        expires_at = int(payload.get("exp", 0))
+    except (binascii.Error, TypeError, ValueError, json.JSONDecodeError):
+        return {"ok": False, "error": "Invalid credentials"}
+
+    if payload.get("role") != role:
+        return {"ok": False, "error": "Invalid credentials"}
+
+    if _normalize_email(payload.get("email")) != _normalize_email(email):
+        return {"ok": False, "error": "Invalid credentials"}
+
+    if expires_at < int(time.time()):
+        return {"ok": False, "error": "Invalid credentials"}
+
+    return {"ok": True, "email": payload["email"], "role": payload["role"]}
+
+
+def _verify_google_id_token(id_token: str) -> dict[str, object]:
+    if _is_blank(id_token):
+        return {"ok": False, "error": "Google ID token is required"}
+
+    google_client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
+    if _is_blank(google_client_id):
+        return {"ok": False, "error": "GOOGLE_CLIENT_ID is not configured"}
+
+    try:
+        from google.auth.transport import requests as google_requests
+        from google.oauth2 import id_token as google_id_token
+    except ImportError:
+        return {"ok": False, "error": "google-auth dependency is not installed"}
+
+    try:
+        token_info = google_id_token.verify_oauth2_token(
+            str(id_token),
+            google_requests.Request(),
+            google_client_id,
+        )
+    except ValueError:
+        return {"ok": False, "error": "Invalid Google ID token"}
+
+    email = _normalize_email(token_info.get("email"))
+    if _is_blank(email):
+        return {"ok": False, "error": "Google ID token is missing email"}
+
+    if token_info.get("email_verified") is False:
+        return {"ok": False, "error": "Google email is not verified"}
+
+    return {"ok": True, "email": email, "token_info": token_info}
+
+
+def _public_user(row: dict[str, object]) -> dict[str, object]:
+    return {
+        "id": row.get("id"),
+        "email": row.get("email"),
+        "full_name": row.get("full_name"),
+    }
+
+
+def _lookup_role_user(db, role: str, email: str) -> dict[str, object] | None:
+    table_name = "students" if role == "student" else "instructors"
+    resp = db.table(table_name).select("id,email,full_name").eq("email", email).execute()
+    if not resp.data:
+        return None
+    return _public_user(resp.data[0])
+
+
+def _authenticate_google_user_by_email(db, email: str, role: str | None = None) -> dict[str, object]:
+    normalized_email = _normalize_email(email)
+    normalized_role = _normalize_role(role)
+    if _is_blank(normalized_email):
+        return {"ok": False, "error": "Google ID token is missing email"}
+
+    if normalized_role is not None and normalized_role not in {"student", "instructor"}:
+        return {"ok": False, "error": "role must be student or instructor"}
+
+    roles_to_check = [normalized_role] if normalized_role else ["student", "instructor"]
+    matches = []
+    for candidate_role in roles_to_check:
+        user = _lookup_role_user(db, str(candidate_role), normalized_email)
+        if user:
+            matches.append({"role": candidate_role, "user": user})
+
+    if normalized_role and not matches:
+        article = "an" if normalized_role == "instructor" else "a"
+        return {"ok": False, "error": f"Google identity is not mapped to {article} {normalized_role} account"}
+
+    if not matches:
+        return {"ok": False, "error": "Google identity is not mapped to a user account"}
+
+    if role is None and len(matches) > 1:
+        return {"ok": False, "error": "Google identity maps to multiple roles; role is required"}
+
+    match = matches[0]
+    try:
+        session_token = _issue_google_session_token(normalized_email, str(match["role"]))
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+
+    return {
+        "ok": True,
+        "role": match["role"],
+        "email": normalized_email,
+        "user": match["user"],
+        "session_token": session_token,
+    }
+
+
 def _authenticate_instructor(db, email, password):
     credentials = _validate_credentials(email, password)
     if not credentials["ok"]:
@@ -40,7 +211,11 @@ def _authenticate_instructor(db, email, password):
     normalized_email = str(credentials["email"])
     auth_resp = db.table("instructors").select("id,email,full_name,password").eq("email", normalized_email).execute()
 
-    if not auth_resp.data or auth_resp.data[0].get("password") != password:
+    if not auth_resp.data:
+        return {"ok": False, "error": "Invalid credentials"}
+
+    session_check = _verify_google_session_token(password, normalized_email, "instructor")
+    if auth_resp.data[0].get("password") != password and not session_check["ok"]:
         return {"ok": False, "error": "Invalid credentials"}
 
     instructor = auth_resp.data[0]
@@ -62,7 +237,11 @@ def _authenticate_student(db, email, password):
     normalized_email = str(credentials["email"])
     auth_resp = db.table("students").select("id,email,full_name,password").eq("email", normalized_email).execute()
 
-    if not auth_resp.data or auth_resp.data[0].get("password") != password:
+    if not auth_resp.data:
+        return {"ok": False, "error": "Invalid credentials"}
+
+    session_check = _verify_google_session_token(password, normalized_email, "student")
+    if auth_resp.data[0].get("password") != password and not session_check["ok"]:
         return {"ok": False, "error": "Invalid credentials"}
 
     student = auth_resp.data[0]
@@ -149,6 +328,19 @@ def get_db() -> Client:
     if not supabase_url or not supabase_service_role_key:
         raise ValueError("Supabase environment variables are missing")
     return create_client(supabase_url, supabase_service_role_key)
+
+
+# ==========================================
+# FEDERATED AUTH APIs
+# ==========================================
+
+def googleLogin(id_token: str | None = None, role: str | None = None) -> dict:
+    token_check = _verify_google_id_token(id_token or "")
+    if not token_check["ok"]:
+        return token_check
+
+    db = get_db()
+    return _authenticate_google_user_by_email(db, str(token_check["email"]), role)
 
 
 # ==========================================

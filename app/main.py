@@ -1,4 +1,7 @@
+from pathlib import Path
+
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
   
 app = FastAPI()
 
@@ -6,6 +9,24 @@ app = FastAPI()
 @app.get("/")
 def root() -> dict:
     return {"ok": True, "message": "InClass Platform API"}
+
+
+# ==========================================
+# FEDERATED AUTH ROUTES
+# ==========================================
+
+@app.post("/auth/google-login")
+def googleLogin(payload: dict) -> dict:
+    from app import services
+
+    id_token = payload.get("id_token") or payload.get("credential")
+    return services.googleLogin(id_token=id_token, role=payload.get("role"))
+
+
+@app.get("/auth/google-test-page")
+def googleTestPage() -> FileResponse:
+    page_path = Path(__file__).parent / "static" / "google_id_token_test_page.html"
+    return FileResponse(page_path)
 
 
 # ==========================================

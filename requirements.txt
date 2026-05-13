@@ -3,3 +3,4 @@ uvicorn
 pytest
 supabase
 python-dotenv
+google-auth
