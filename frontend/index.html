@@ -3,158 +3,347 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>InClass Platform Demo UI</title>
+  <title>InClass Platform</title>
   <link rel="stylesheet" href="/ui-static/styles.css">
 </head>
 <body>
-  <header class="topbar">
-    <div>
-      <h1>InClass Platform Demo UI</h1>
-      <p class="warning">Passwords are never shown in logs. This UI calls the FastAPI backend only.</p>
-    </div>
-    <div id="globalStatus" class="badge badge-neutral">Ready</div>
-  </header>
-
-  <main class="layout">
-    <aside class="panel sticky">
-      <h2>Demo Setup / Credentials</h2>
-      <div class="field"><label for="baseUrl">Backend base URL</label><input id="baseUrl" data-save value=""></div>
-      <div class="field"><label for="instructorEmail">Instructor email</label><input id="instructorEmail" data-save type="email" autocomplete="username"></div>
-      <div class="field"><label for="instructorPassword">Instructor password</label><input id="instructorPassword" type="password" autocomplete="current-password"></div>
-      <div class="field"><label for="studentEmail">Student email</label><input id="studentEmail" data-save type="email" autocomplete="username"></div>
-      <div class="field"><label for="studentPassword">Student password</label><input id="studentPassword" type="password" autocomplete="current-password"></div>
-      <div class="grid-two">
-        <div class="field"><label for="courseId">Course ID</label><input id="courseId" data-save placeholder="CS101"></div>
-        <div class="field"><label for="activityNo">Activity no</label><input id="activityNo" data-save type="number" min="1" value="1"></div>
-        <div class="field"><label for="studentId">Student ID</label><input id="studentId" data-save type="number" min="1"></div>
-        <div class="field"><label for="resetStudentEmail">Student email for reset password</label><input id="resetStudentEmail" data-save type="email"></div>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand-block">
+        <div class="brand-mark">IC</div>
+        <div>
+          <p class="eyebrow">Demo Console</p>
+          <h1>InClass Platform</h1>
+        </div>
       </div>
-      <label class="check"><input id="rememberPasswords" type="checkbox"> Remember passwords on this browser for local demo only</label>
-      <div class="button-row">
-        <button id="saveDemoFields">Save non-password demo fields</button>
-        <button id="clearDemoFields" class="secondary">Clear saved demo fields</button>
+      <nav class="nav-list" aria-label="Demo views">
+        <button class="nav-item active" data-view-target="setupView">Demo Setup</button>
+        <button class="nav-item" data-view-target="instructorView">Instructor View</button>
+        <button class="nav-item" data-view-target="studentView">Student View</button>
+        <button class="nav-item" data-view-target="userManagementView">User Management</button>
+        <button class="nav-item" data-view-target="demoFlowView">Demo Flow</button>
+        <button class="nav-item" data-view-target="negativeTestsView">Negative Tests</button>
+        <button class="nav-item" data-view-target="rawEvidenceView">Raw Evidence</button>
+      </nav>
+      <div class="sidebar-note">
+        <strong>Protected requests</strong>
+        <span>Email and password are sent to the FastAPI backend for each protected endpoint. Passwords are masked in this UI.</span>
       </div>
     </aside>
 
-    <section class="content">
-      <section class="panel">
-        <div class="section-head">
-          <h2>System Health</h2>
+    <main class="main-area">
+      <header class="top-header">
+        <div>
+          <p class="eyebrow">Fast, local, black-box demo</p>
+          <h2>InClass Platform</h2>
+          <p>Black-box demo interface for instructor-controlled LLM classroom activities</p>
+        </div>
+        <div class="header-badges">
+          <span class="badge badge-info">FastAPI + Supabase</span>
+          <span id="globalStatus" class="badge badge-neutral">Ready</span>
+        </div>
+      </header>
+
+      <section id="setupView" class="view active-view" data-view-title="Demo Setup">
+        <div class="view-title-row">
+          <div>
+            <p class="eyebrow">Shared values</p>
+            <h2>Demo Setup</h2>
+          </div>
           <button data-action="health">Check API health</button>
         </div>
-        <div id="healthBadge" class="badge badge-neutral">Not checked</div>
-        <pre id="healthOut" class="output"></pre>
+
+        <div class="card-grid two">
+          <section class="card">
+            <h3>Connection</h3>
+            <div class="field"><label for="baseUrl">Backend base URL</label><input id="baseUrl" data-save></div>
+            <div id="readyCard" class="ready-card warning">
+              <strong>Required fields missing</strong>
+              <span>Fill instructor, student, course, activity, and student ID fields before the guided demo.</span>
+            </div>
+            <div class="button-row">
+              <button id="saveDemoFields">Save demo fields</button>
+              <button id="clearDemoFields" class="secondary">Clear saved demo fields</button>
+            </div>
+            <label class="check"><input id="rememberPasswords" type="checkbox"> Remember passwords on this browser for local demo only</label>
+          </section>
+
+          <section class="card">
+            <h3>Credentials and IDs</h3>
+            <div class="grid-two">
+              <div class="field"><label for="instructorEmail">Instructor email</label><input id="instructorEmail" data-save type="email" autocomplete="username"></div>
+              <div class="field"><label for="instructorPassword">Instructor password</label><input id="instructorPassword" type="password" autocomplete="current-password"></div>
+              <div class="field"><label for="studentEmail">Student email</label><input id="studentEmail" data-save type="email" autocomplete="username"></div>
+              <div class="field"><label for="studentPassword">Student password</label><input id="studentPassword" type="password" autocomplete="current-password"></div>
+              <div class="field"><label for="courseId">Course ID</label><input id="courseId" data-save placeholder="CS101"></div>
+              <div class="field"><label for="activityNo">Activity no</label><input id="activityNo" data-save type="number" min="1" value="1"></div>
+              <div class="field"><label for="studentId">Student ID</label><input id="studentId" data-save type="number" min="1"></div>
+              <div class="field"><label for="resetStudentEmail">Student email for reset password</label><input id="resetStudentEmail" data-save type="email"></div>
+            </div>
+          </section>
+        </div>
+        <section-output title="Setup output"><pre id="setupOut" class="output"></pre></section-output>
       </section>
 
-      <section class="panel">
-        <h2>Instructor Panel</h2>
-        <div class="actions">
-          <button data-action="instructorLogin">Instructor login</button>
-          <button data-action="setInstructorPassword">Set instructor password</button>
-          <button data-action="changeInstructorPassword">Change instructor password</button>
-          <button data-action="listMyCourses">List my courses</button>
-          <button data-action="listActivities">List activities</button>
-        </div>
-        <div class="grid-two">
-          <div class="field"><label for="instructorOldPassword">Old instructor password</label><input id="instructorOldPassword" type="password"></div>
-          <div class="field"><label for="instructorNewPassword">New instructor password</label><input id="instructorNewPassword" type="password"></div>
+      <section id="instructorView" class="view" data-view-title="Instructor View">
+        <div class="view-title-row">
+          <div>
+            <p class="eyebrow">Instructor console</p>
+            <h2>Instructor View</h2>
+          </div>
+          <span class="badge badge-info">Course orchestration</span>
         </div>
 
-        <h3>Create activity</h3>
-        <div class="field"><label for="activityText">Activity text</label><textarea id="activityText" rows="4">Explain the main idea in your own words.</textarea></div>
-        <div class="field"><label for="learningObjectives">Learning objectives, one per line</label><textarea id="learningObjectives" rows="3">Identify the concept
+        <div class="card-grid two">
+          <section class="card">
+            <h3>Instructor Authentication</h3>
+            <div class="actions">
+              <button data-action="instructorLogin">Instructor login</button>
+              <button data-action="setInstructorPassword">Set instructor password</button>
+              <button data-action="changeInstructorPassword">Change instructor password</button>
+            </div>
+            <div class="grid-two">
+              <div class="field"><label for="instructorOldPassword">Old instructor password</label><input id="instructorOldPassword" type="password"></div>
+              <div class="field"><label for="instructorNewPassword">New instructor password</label><input id="instructorNewPassword" type="password"></div>
+            </div>
+          </section>
+
+          <section class="card">
+            <h3>Course Management</h3>
+            <button data-action="listMyCourses">List my courses</button>
+            <div id="coursesDisplay" class="data-zone empty">Courses will appear here. Click a returned course to fill Course ID.</div>
+          </section>
+        </div>
+
+        <section class="card">
+          <div class="split-head">
+            <h3>Activity Management</h3>
+            <div class="actions compact">
+              <button data-action="listActivities">List activities</button>
+              <button data-action="startActivity">Start activity</button>
+              <button data-action="endActivity">End activity</button>
+              <button data-action="resetActivity" class="danger">Reset activity</button>
+            </div>
+          </div>
+          <div id="activitiesDisplay" class="data-zone empty">Activities will appear here.</div>
+          <div class="card-grid two nested">
+            <div>
+              <h4>Create activity</h4>
+              <div class="field"><label for="activityText">Activity text</label><textarea id="activityText" rows="4">Explain the main idea in your own words.</textarea></div>
+              <div class="field"><label for="learningObjectives">Learning objectives, one objective per line</label><textarea id="learningObjectives" rows="3">Identify the concept
 Apply it to a short example</textarea></div>
-        <div class="field small"><label for="optionalActivityNo">Optional activity no</label><input id="optionalActivityNo" type="number" min="1"></div>
-        <button data-action="createActivity">Create activity</button>
+              <div class="field narrow"><label for="optionalActivityNo">Optional activity no</label><input id="optionalActivityNo" type="number" min="1"></div>
+              <button data-action="createActivity">Create activity</button>
+            </div>
+            <div>
+              <h4>Update activity</h4>
+              <div class="field"><label for="updateActivityText">Optional new activity_text</label><textarea id="updateActivityText" rows="4"></textarea></div>
+              <div class="field"><label for="updateLearningObjectives">Optional new learning_objectives, one per line</label><textarea id="updateLearningObjectives" rows="3"></textarea></div>
+              <button data-action="updateActivity">Update activity</button>
+            </div>
+          </div>
+        </section>
 
-        <h3>Update activity</h3>
-        <div class="field"><label for="updateActivityText">Optional new activity_text</label><textarea id="updateActivityText" rows="3"></textarea></div>
-        <div class="field"><label for="updateLearningObjectives">Optional new learning_objectives, one per line</label><textarea id="updateLearningObjectives" rows="3"></textarea></div>
-        <button data-action="updateActivity">Update activity</button>
+        <div class="card-grid two">
+          <section class="card">
+            <h3>Grading / Reports</h3>
+            <div class="grid-two">
+              <div class="field"><label for="manualScore">Manual grade score</label><input id="manualScore" type="number" step="0.01" value="1"></div>
+              <div class="field"><label for="manualReason">Manual grade reason</label><input id="manualReason" value="Demo manual grade"></div>
+            </div>
+            <div class="actions">
+              <button data-action="manualGrade">Manual grade</button>
+              <button data-action="exportScores">Export scores</button>
+              <button id="downloadCsv" class="secondary hidden">Download CSV</button>
+            </div>
+            <div id="scoresDisplay" class="data-zone empty">Exported score rows will appear here.</div>
+          </section>
 
-        <h3>Activity state and grading</h3>
-        <div class="actions">
-          <button data-action="startActivity">Start activity</button>
-          <button data-action="endActivity">End activity</button>
-          <button data-action="resetActivity">Reset activity</button>
-          <button data-action="exportScores">Export scores</button>
-        </div>
-        <div id="csvTools" class="csv-tools hidden">
-          <button id="downloadCsv" class="secondary">Download CSV</button>
-          <details><summary>Returned CSV</summary><pre id="csvOut"></pre></details>
-        </div>
-        <div class="grid-two">
-          <div class="field"><label for="resetNewPassword">Reset student new password</label><input id="resetNewPassword" type="password"></div>
-          <div class="field"><label for="manualScore">Manual grade score</label><input id="manualScore" type="number" step="0.01" value="1"></div>
-        </div>
-        <div class="field"><label for="manualReason">Manual grade reason</label><input id="manualReason" value="Demo manual grade"></div>
-        <div class="actions">
-          <button data-action="resetStudentPassword">Reset student password</button>
-          <button data-action="manualGrade">Manual grade</button>
+          <section class="card">
+            <h3>Student Support</h3>
+            <div class="field"><label for="resetNewPassword">Reset student new password</label><input id="resetNewPassword" type="password"></div>
+            <button data-action="resetStudentPassword">Reset student password</button>
+            <p class="quiet">The new password is sent to the backend only and is masked in evidence logs.</p>
+          </section>
         </div>
         <pre id="instructorOut" class="output"></pre>
       </section>
 
-      <section class="panel">
-        <h2>Student Panel</h2>
-        <div class="actions">
-          <button data-action="studentLogin">Student login</button>
-          <button data-action="setStudentPassword">Set student password</button>
-          <button data-action="changeStudentPassword">Change student password</button>
-          <button data-action="getActivity">Get activity</button>
+      <section id="studentView" class="view" data-view-title="Student View">
+        <div class="view-title-row">
+          <div>
+            <p class="eyebrow">Student-facing tutor</p>
+            <h2>Student View</h2>
+          </div>
+          <span class="badge badge-info">AI tutor screen</span>
         </div>
-        <div class="grid-two">
-          <div class="field"><label for="studentOldPassword">Old student password</label><input id="studentOldPassword" type="password"></div>
-          <div class="field"><label for="studentNewPassword">New student password</label><input id="studentNewPassword" type="password"></div>
+
+        <div class="card-grid two">
+          <section class="card">
+            <h3>Student Authentication</h3>
+            <div class="actions">
+              <button data-action="studentLogin">Student login</button>
+              <button data-action="setStudentPassword">Set student password</button>
+              <button data-action="changeStudentPassword">Change student password</button>
+            </div>
+            <div class="grid-two">
+              <div class="field"><label for="studentOldPassword">Old student password</label><input id="studentOldPassword" type="password"></div>
+              <div class="field"><label for="studentNewPassword">New student password</label><input id="studentNewPassword" type="password"></div>
+            </div>
+          </section>
+
+          <section class="card student-card">
+            <h3>Active Activity</h3>
+            <button data-action="getActivity">Get activity</button>
+            <div id="objectiveWarning" class="integrity-pill warning">Hidden instructional fields are not exposed.</div>
+            <div id="activityDisplay" class="activity-display">No active activity loaded yet.</div>
+          </section>
         </div>
-        <p id="objectiveWarning" class="notice">Learning objectives should not be exposed to student.</p>
-        <div id="activityDisplay" class="activity-display"></div>
-        <h3>Tutoring chat</h3>
-        <div id="chatPanel" class="chat-panel"></div>
-        <div class="field"><label for="studentAnswer">Answer</label><textarea id="studentAnswer" rows="3"></textarea></div>
-        <div class="actions">
-          <button data-action="startTutoring">Start / continue tutoring</button>
-          <button data-action="submitAnswer">Submit answer</button>
-        </div>
-        <h3>Log score</h3>
-        <div class="grid-two">
-          <div class="field"><label for="studentScore">Score</label><input id="studentScore" type="number" step="0.01" value="1"></div>
-          <div class="field"><label for="scoreMeta">Meta</label><input id="scoreMeta" value="demo"></div>
-        </div>
-        <button data-action="logScore">Log score</button>
+
+        <section class="card tutor-card">
+          <div class="split-head">
+            <h3>AI Tutor Chat</h3>
+            <div id="studentStateDisplay" class="badge badge-neutral">No score/state yet</div>
+          </div>
+          <div id="chatPanel" class="chat-panel">
+            <div class="message assistant">When the activity is active, start tutoring or submit an answer here.</div>
+          </div>
+          <div class="field"><label for="studentAnswer">Answer</label><textarea id="studentAnswer" rows="3"></textarea></div>
+          <div class="actions">
+            <button data-action="startTutoring">Start / continue tutoring</button>
+            <button data-action="submitAnswer">Submit answer</button>
+          </div>
+        </section>
+
+        <section class="card">
+          <h3>Score Test</h3>
+          <div class="grid-two">
+            <div class="field"><label for="studentScore">Score</label><input id="studentScore" type="number" step="0.01" value="1"></div>
+            <div class="field"><label for="scoreMeta">Meta</label><input id="scoreMeta" value="demo"></div>
+          </div>
+          <button data-action="logScore">Log score</button>
+        </section>
         <pre id="studentOut" class="output"></pre>
       </section>
 
-      <section class="panel">
-        <h2>Demo Flow</h2>
+      <section id="userManagementView" class="view" data-view-title="User Management">
+        <div class="view-title-row">
+          <div>
+            <p class="eyebrow">Password operations only</p>
+            <h2>User Management</h2>
+          </div>
+          <span class="badge badge-warning">Not an admin system</span>
+        </div>
+        <div class="card-grid three">
+          <section class="card">
+            <h3>Instructor</h3>
+            <div class="grid-two">
+              <div class="field"><label for="umInstructorOldPassword">Old password</label><input id="umInstructorOldPassword" type="password"></div>
+              <div class="field"><label for="umInstructorNewPassword">New password</label><input id="umInstructorNewPassword" type="password"></div>
+            </div>
+            <div class="actions">
+              <button data-action="setInstructorPasswordUserMgmt">Set instructor password</button>
+              <button data-action="changeInstructorPasswordUserMgmt">Change instructor password</button>
+            </div>
+          </section>
+          <section class="card">
+            <h3>Student</h3>
+            <div class="grid-two">
+              <div class="field"><label for="umStudentOldPassword">Old password</label><input id="umStudentOldPassword" type="password"></div>
+              <div class="field"><label for="umStudentNewPassword">New password</label><input id="umStudentNewPassword" type="password"></div>
+            </div>
+            <div class="actions">
+              <button data-action="setStudentPasswordUserMgmt">Set student password</button>
+              <button data-action="changeStudentPasswordUserMgmt">Change student password</button>
+            </div>
+          </section>
+          <section class="card">
+            <h3>Instructor support</h3>
+            <div class="field"><label for="umResetNewPassword">Reset enrolled student password</label><input id="umResetNewPassword" type="password"></div>
+            <button data-action="resetStudentPasswordUserMgmt">Reset student password</button>
+          </section>
+        </div>
+        <pre id="userManagementOut" class="output"></pre>
+      </section>
+
+      <section id="demoFlowView" class="view" data-view-title="Demo Flow">
+        <div class="view-title-row">
+          <div>
+            <p class="eyebrow">Guided black-box run</p>
+            <h2>Demo Flow</h2>
+          </div>
+          <span class="badge badge-info">One step at a time</span>
+        </div>
         <ol id="demoFlow" class="flow-list"></ol>
       </section>
 
-      <section class="panel">
-        <h2>Negative Tests</h2>
-        <div class="grid-two">
-          <div class="field"><label for="badInstructorEmail">Unauthorized instructor email</label><input id="badInstructorEmail" data-save type="email"></div>
-          <div class="field"><label for="badInstructorPassword">Unauthorized instructor password</label><input id="badInstructorPassword" type="password"></div>
-          <div class="field"><label for="badStudentEmail">Unauthorized student email</label><input id="badStudentEmail" data-save type="email"></div>
-          <div class="field"><label for="badStudentPassword">Unauthorized student password</label><input id="badStudentPassword" type="password"></div>
+      <section id="negativeTestsView" class="view" data-view-title="Negative Tests">
+        <div class="view-title-row">
+          <div>
+            <p class="eyebrow">Authorization evidence</p>
+            <h2>Negative Tests</h2>
+          </div>
+          <span class="badge badge-warning">Expected rejections</span>
         </div>
-        <div class="actions">
-          <button data-action="badInstructorListActivities">Unauthorized instructor tries list activities</button>
-          <button data-action="badInstructorResetActivity">Unauthorized instructor tries reset activity</button>
-          <button data-action="badInstructorManualGrade">Unauthorized instructor tries manual grade</button>
-          <button data-action="badStudentGetActivity">Unauthorized student tries get activity</button>
-        </div>
+        <section class="card">
+          <div class="grid-two">
+            <div class="field"><label for="badInstructorEmail">Unauthorized instructor email</label><input id="badInstructorEmail" data-save type="email"></div>
+            <div class="field"><label for="badInstructorPassword">Unauthorized instructor password</label><input id="badInstructorPassword" type="password"></div>
+            <div class="field"><label for="badStudentEmail">Unauthorized student email</label><input id="badStudentEmail" data-save type="email"></div>
+            <div class="field"><label for="badStudentPassword">Unauthorized student password</label><input id="badStudentPassword" type="password"></div>
+          </div>
+          <div class="actions">
+            <button data-action="badInstructorListActivities">Unauthorized instructor list activities</button>
+            <button data-action="badInstructorResetActivity">Unauthorized instructor reset activity</button>
+            <button data-action="badInstructorManualGrade">Unauthorized instructor manual grade</button>
+            <button data-action="badStudentGetActivity">Unauthorized student get activity</button>
+          </div>
+        </section>
         <pre id="negativeOut" class="output"></pre>
       </section>
-    </section>
 
-    <aside class="panel sticky last">
-      <h2>Last Response</h2>
-      <div id="lastBadge" class="badge badge-neutral">No response yet</div>
-      <pre id="lastSummary" class="request-summary"></pre>
-      <pre id="lastResponse" class="output tall"></pre>
+      <section id="rawEvidenceView" class="view" data-view-title="Raw Evidence">
+        <div class="view-title-row">
+          <div>
+            <p class="eyebrow">Audit trail</p>
+            <h2>Raw Evidence</h2>
+          </div>
+          <div class="actions compact">
+            <button id="clearHistory" class="secondary">Clear history</button>
+            <button id="exportHistory" class="secondary">Export request history as JSON</button>
+          </div>
+        </div>
+        <div class="card-grid two">
+          <section class="card">
+            <h3>Last request summary, sanitized</h3>
+            <pre id="rawLastSummary" class="output tall"></pre>
+          </section>
+          <section class="card">
+            <h3>Last response raw JSON</h3>
+            <pre id="rawLastResponse" class="output tall"></pre>
+          </section>
+        </div>
+        <section class="card">
+          <h3>Request history list</h3>
+          <div id="historyList" class="history-list empty">No requests yet.</div>
+        </section>
+      </section>
+    </main>
+
+    <aside class="evidence-panel">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Live evidence</p>
+          <h2>Last Response / Evidence</h2>
+        </div>
+        <div id="lastBadge" class="badge badge-neutral">No response yet</div>
+      </div>
+      <h3>Sanitized request</h3>
+      <pre id="lastSummary" class="output compact-output"></pre>
+      <h3>Raw response</h3>
+      <pre id="lastResponse" class="output evidence-output"></pre>
     </aside>
-  </main>
+  </div>
 
   <script src="/ui-static/app.js" defer></script>
 </body>

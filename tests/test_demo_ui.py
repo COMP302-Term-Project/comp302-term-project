@@ -29,7 +29,7 @@ def test_get_ui_returns_html():
 
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
-    assert "InClass Platform Demo UI" in response.text
+    assert "InClass Platform" in response.text
 
 
 def test_frontend_files_exist():
@@ -51,5 +51,12 @@ def test_frontend_files_do_not_contain_obvious_secrets():
 def test_frontend_html_mentions_key_demo_sections():
     html = (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
 
-    for section in ["Instructor Panel", "Student Panel", "Demo Flow", "Negative Tests"]:
+    for section in [
+        "Instructor View",
+        "Student View",
+        "User Management",
+        "Demo Flow",
+        "Negative Tests",
+        "Raw Evidence",
+    ]:
         assert section in html

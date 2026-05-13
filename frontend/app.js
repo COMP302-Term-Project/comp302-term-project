@@ -1,7 +1,15 @@
 (function () {
   "use strict";
 
-  const fields = [
+  const safeStorageKey = "inclassDemoUiFieldsV2";
+  const passwordStorageKey = "inclassDemoUiPasswordsV2";
+  const passwordKeys = new Set([
+    "instructorPassword",
+    "studentPassword",
+    "badInstructorPassword",
+    "badStudentPassword",
+  ]);
+  const setupFields = [
     "baseUrl",
     "instructorEmail",
     "instructorPassword",
@@ -16,29 +24,33 @@
     "badStudentEmail",
     "badStudentPassword",
   ];
-  const passwordFields = new Set([
+  const requiredDemoFields = [
+    "baseUrl",
+    "instructorEmail",
     "instructorPassword",
+    "studentEmail",
     "studentPassword",
-    "badInstructorPassword",
-    "badStudentPassword",
-  ]);
-  const safeStorageKey = "inclassDemoUiFields";
-  const passwordStorageKey = "inclassDemoUiPasswords";
+    "courseId",
+    "activityNo",
+    "studentId",
+  ];
+  const history = [];
   let latestCsv = "";
 
   const flowSteps = [
-    ["Instructor login", "/instructor/login", "instructorLogin", "success"],
-    ["Student login", "/student/login", "studentLogin", "success"],
-    ["Instructor list my courses", "/instructor/list-my-courses", "listMyCourses", "success"],
-    ["Instructor list activities", "/instructor/list-activities", "listActivities", "success"],
-    ["Create activity", "/instructor/create-activity", "createActivity", "success"],
-    ["Start activity", "/instructor/start-activity", "startActivity", "success"],
-    ["Student get active activity", "/student/get-activity", "getActivity", "success"],
-    ["Student submit tutoring answer", "/student/submit-tutoring-answer", "submitAnswer", "success"],
-    ["Export scores", "/instructor/export-scores", "exportScores", "success"],
-    ["Manual grade", "/instructor/manual-grade", "manualGrade", "success"],
-    ["Reset activity", "/instructor/reset-activity", "resetActivity", "success"],
-    ["Try student logScore after reset", "/student/log-score", "logScore", "postResetFailure"],
+    ["Check API health", "Confirm the FastAPI backend is reachable.", "/", "health", "success"],
+    ["Instructor login", "Verify instructor credentials.", "/instructor/login", "instructorLogin", "success"],
+    ["Student login", "Verify student credentials.", "/student/login", "studentLogin", "success"],
+    ["Instructor list my courses", "Show instructor-scoped course access.", "/instructor/list-my-courses", "listMyCourses", "success"],
+    ["Instructor list activities", "Show activities for the selected course.", "/instructor/list-activities", "listActivities", "success"],
+    ["Create activity", "Create an instructor-controlled activity.", "/instructor/create-activity", "createActivity", "success"],
+    ["Start activity", "Make the activity available to students.", "/instructor/start-activity", "startActivity", "success"],
+    ["Student get active activity", "Load the student-facing activity text.", "/student/get-activity", "getActivity", "success"],
+    ["Student submit tutoring answer", "Send an answer into the AI tutoring flow.", "/student/submit-tutoring-answer", "submitAnswer", "success"],
+    ["Export scores", "Export score evidence as JSON/CSV.", "/instructor/export-scores", "exportScores", "success"],
+    ["Manual grade", "Record an instructor grade.", "/instructor/manual-grade", "manualGrade", "success"],
+    ["Reset activity", "Clear runtime score state and end the activity.", "/instructor/reset-activity", "resetActivity", "success"],
+    ["Student tries logScore after reset", "Expected rejection because the activity is no longer active.", "/student/log-score", "logScore", "postResetFailure"],
   ];
 
   function el(id) {
@@ -50,9 +62,20 @@
     return node ? node.value.trim() : "";
   }
 
+  function setValue(id, next) {
+    const node = el(id);
+    if (node) node.value = next == null ? "" : String(next);
+    updateReadyCard();
+  }
+
   function numberValue(id) {
     const raw = value(id);
     return raw === "" ? "" : Number(raw);
+  }
+
+  function baseUrl() {
+    const fallback = window.location.origin || "http://127.0.0.1:8000";
+    return (value("baseUrl") || fallback).replace(/\/+$/, "");
   }
 
   function objectives(id) {
@@ -62,75 +85,68 @@
       .filter(Boolean);
   }
 
-  function baseUrl() {
-    return (value("baseUrl") || window.location.origin).replace(/\/+$/, "");
-  }
-
   function setBadge(target, text, kind) {
     if (!target) return;
     target.className = "badge badge-" + kind;
     target.textContent = text;
   }
 
-  function renderJson(targetId, data) {
-    const target = el(targetId);
-    if (target) target.textContent = format(data);
-  }
-
-  function format(data) {
-    if (typeof data === "string") return data;
-    return JSON.stringify(data, null, 2);
-  }
-
-  function masked(obj) {
-    if (!obj || typeof obj !== "object") return obj;
-    if (Array.isArray(obj)) return obj.map(masked);
+  function maskSensitive(data) {
+    if (data == null || typeof data !== "object") return data;
+    if (Array.isArray(data)) return data.map(maskSensitive);
     const copy = {};
-    for (const [key, val] of Object.entries(obj)) {
-      copy[key] = key.toLowerCase().includes("password") ? "***" : masked(val);
+    for (const [key, val] of Object.entries(data)) {
+      copy[key] = key.toLowerCase().includes("password") ? "***" : maskSensitive(val);
     }
     return copy;
   }
 
-  function summary(method, path, params, body) {
-    return {
-      method,
-      path,
-      params: masked(params || {}),
-      body: body === undefined ? undefined : masked(body),
-    };
+  function format(data) {
+    if (typeof data === "string") return data;
+    return JSON.stringify(maskSensitive(data), null, 2);
   }
 
-  function classify(data, expected) {
-    if (expected === "postResetFailure") {
-      const error = String((data && data.error) || "").toLowerCase();
-      return data && data.ok === false && error.includes("activity") && error.includes("active")
-        ? ["PASS", "success"]
-        : ["FAIL", "error"];
+  function summary(method, path, params, body) {
+    return maskSensitive({
+      method,
+      path,
+      params: params || {},
+      body: body === undefined ? undefined : body,
+    });
+  }
+
+  function visibleOutputForAction(action) {
+    if (action === "health") return "setupOut";
+    if (action.includes("UserMgmt")) return "userManagementOut";
+    if (action.startsWith("bad")) return "negativeOut";
+    if (["studentLogin", "setStudentPassword", "changeStudentPassword", "getActivity", "startTutoring", "submitAnswer", "logScore"].includes(action)) {
+      return "studentOut";
     }
-    if (expected === "expectedFailure") {
-      return data && data.ok === false ? ["EXPECTED FAILURE", "warning"] : ["UNEXPECTED", "error"];
-    }
-    return data && data.ok === true ? ["PASS", "success"] : ["FAIL", "error"];
+    return "instructorOut";
+  }
+
+  function renderTo(id, data) {
+    const node = el(id);
+    if (node) node.textContent = format(data);
   }
 
   async function apiCall(path, params, options) {
     const opts = options || {};
     const method = opts.method || "POST";
     const qs = new URLSearchParams();
-    for (const [key, val] of Object.entries(params || {})) {
+    Object.entries(params || {}).forEach(([key, val]) => {
       if (val !== "" && val !== undefined && val !== null) qs.append(key, val);
-    }
-    const url = baseUrl() + path + (qs.toString() ? "?" + qs.toString() : "");
-    const requestSummary = summary(method, path, params, opts.body);
+    });
+
     const fetchOptions = { method, headers: {} };
     if (opts.body !== undefined) {
       fetchOptions.headers["Content-Type"] = "application/json";
       fetchOptions.body = JSON.stringify(opts.body);
     }
 
+    const requestSummary = summary(method, path, params, opts.body);
     try {
-      const response = await fetch(url, fetchOptions);
+      const response = await fetch(baseUrl() + path + (qs.toString() ? "?" + qs.toString() : ""), fetchOptions);
       const text = await response.text();
       let data;
       try {
@@ -141,35 +157,47 @@
       if (!response.ok && data && data.detail) {
         data = { ok: false, error: "HTTP " + response.status, detail: data.detail };
       }
-      updateLast(requestSummary, data, response.ok);
+      updateEvidence(requestSummary, data, response.ok);
       return { data, requestSummary, httpOk: response.ok };
     } catch (err) {
       const data = { ok: false, error: "Backend unreachable", detail: String(err.message || err) };
-      updateLast(requestSummary, data, false);
+      updateEvidence(requestSummary, data, false);
       return { data, requestSummary, httpOk: false };
     }
   }
 
-  function updateLast(requestSummary, data, httpOk) {
-    el("lastSummary").textContent = format(requestSummary);
-    el("lastResponse").textContent = format(data);
-    const ok = data && data.ok === true;
-    setBadge(el("lastBadge"), ok ? "Success" : httpOk ? "Backend returned error" : "Request failed", ok ? "success" : "error");
-    setBadge(el("globalStatus"), ok ? "Last request ok" : "Check response", ok ? "success" : "warning");
+  function updateEvidence(requestSummary, data, httpOk) {
+    const safeResponse = maskSensitive(data);
+    renderTo("lastSummary", requestSummary);
+    renderTo("rawLastSummary", requestSummary);
+    renderTo("lastResponse", safeResponse);
+    renderTo("rawLastResponse", safeResponse);
+
+    const ok = safeResponse && safeResponse.ok === true;
+    setBadge(el("lastBadge"), ok ? "PASS" : httpOk ? "Backend response" : "Request failed", ok ? "success" : "warning");
+    setBadge(el("globalStatus"), ok ? "Last request passed" : "Evidence updated", ok ? "success" : "warning");
+
+    history.unshift({
+      at: new Date().toISOString(),
+      request: requestSummary,
+      response: safeResponse,
+    });
+    if (history.length > 40) history.pop();
+    renderHistory();
   }
 
-  function instructorParams(overrides) {
+  function instructorParams(extra) {
     return Object.assign({
       email: value("instructorEmail"),
       password: value("instructorPassword"),
-    }, overrides || {});
+    }, extra || {});
   }
 
-  function studentParams(overrides) {
+  function studentParams(extra) {
     return Object.assign({
       email: value("studentEmail"),
       password: value("studentPassword"),
-    }, overrides || {});
+    }, extra || {});
   }
 
   function courseActivity() {
@@ -179,37 +207,48 @@
     };
   }
 
-  async function health() {
-    const result = await apiCall("/", {}, { method: "GET" });
-    renderJson("healthOut", result.data);
-    setBadge(el("healthBadge"), result.data && result.data.ok === true ? "ok true" : "Not ok", result.data && result.data.ok === true ? "success" : "error");
-    return result;
-  }
-
   const actions = {
-    health,
+    health: async () => {
+      const result = await apiCall("/", {}, { method: "GET" });
+      updateReadyCard();
+      return result;
+    },
     instructorLogin: () => apiCall("/instructor/login", instructorParams()),
     setInstructorPassword: () => apiCall("/instructor/set-password", instructorParams()),
+    setInstructorPasswordUserMgmt: () => apiCall("/instructor/set-password", instructorParams()),
     changeInstructorPassword: () => apiCall("/instructor/change-password", instructorParams({
       old_password: value("instructorOldPassword"),
       new_password: value("instructorNewPassword"),
     })),
-    listMyCourses: () => apiCall("/instructor/list-my-courses", instructorParams()),
-    listActivities: () => apiCall("/instructor/list-activities", instructorParams({ course_id: value("courseId") })),
-    createActivity: () => {
+    changeInstructorPasswordUserMgmt: () => apiCall("/instructor/change-password", instructorParams({
+      old_password: value("umInstructorOldPassword"),
+      new_password: value("umInstructorNewPassword"),
+    })),
+    listMyCourses: async () => {
+      const result = await apiCall("/instructor/list-my-courses", instructorParams());
+      renderCourses(result.data);
+      return result;
+    },
+    listActivities: async () => {
+      const result = await apiCall("/instructor/list-activities", instructorParams({ course_id: value("courseId") }));
+      renderActivities(result.data);
+      return result;
+    },
+    createActivity: async () => {
       const params = instructorParams({
         course_id: value("courseId"),
         activity_text: value("activityText"),
       });
-      const optionalNo = value("optionalActivityNo");
-      if (optionalNo) params.activity_no_optional = Number(optionalNo);
-      return apiCall("/instructor/create-activity", params, { body: objectives("learningObjectives") });
+      if (value("optionalActivityNo")) params.activity_no_optional = numberValue("optionalActivityNo");
+      const result = await apiCall("/instructor/create-activity", params, { body: objectives("learningObjectives") });
+      if (result.data && result.data.ok) renderActivities(result.data);
+      return result;
     },
     updateActivity: () => {
       const patch = {};
       if (value("updateActivityText")) patch.activity_text = value("updateActivityText");
-      const newObjectives = objectives("updateLearningObjectives");
-      if (newObjectives.length) patch.learning_objectives = newObjectives;
+      const nextObjectives = objectives("updateLearningObjectives");
+      if (nextObjectives.length) patch.learning_objectives = nextObjectives;
       return apiCall("/instructor/update-activity", instructorParams(courseActivity()), { body: patch });
     },
     startActivity: () => apiCall("/instructor/start-activity", instructorParams(courseActivity())),
@@ -217,15 +256,20 @@
     resetActivity: () => apiCall("/instructor/reset-activity", instructorParams(courseActivity())),
     exportScores: async () => {
       const result = await apiCall("/instructor/export-scores", instructorParams(courseActivity()));
-      latestCsv = (result.data && (result.data.csv || result.data.csv_text || result.data.content)) || "";
-      el("csvTools").classList.toggle("hidden", !latestCsv);
-      el("csvOut").textContent = latestCsv;
+      latestCsv = (result.data && result.data.csv) || "";
+      renderScores(result.data);
+      el("downloadCsv").classList.toggle("hidden", !latestCsv);
       return result;
     },
     resetStudentPassword: () => apiCall("/instructor/reset-student-password", instructorParams({
       course_id: value("courseId"),
       student_email: value("resetStudentEmail"),
       new_password: value("resetNewPassword"),
+    })),
+    resetStudentPasswordUserMgmt: () => apiCall("/instructor/reset-student-password", instructorParams({
+      course_id: value("courseId"),
+      student_email: value("resetStudentEmail"),
+      new_password: value("umResetNewPassword"),
     })),
     manualGrade: () => apiCall("/instructor/manual-grade", instructorParams({
       course_id: value("courseId"),
@@ -236,9 +280,14 @@
     })),
     studentLogin: () => apiCall("/student/login", studentParams()),
     setStudentPassword: () => apiCall("/student/set-password", studentParams()),
+    setStudentPasswordUserMgmt: () => apiCall("/student/set-password", studentParams()),
     changeStudentPassword: () => apiCall("/student/change-password", studentParams({
       old_password: value("studentOldPassword"),
       new_password: value("studentNewPassword"),
+    })),
+    changeStudentPasswordUserMgmt: () => apiCall("/student/change-password", studentParams({
+      old_password: value("umStudentOldPassword"),
+      new_password: value("umStudentNewPassword"),
     })),
     getActivity: async () => {
       const result = await apiCall("/student/get-activity", studentParams(courseActivity()));
@@ -247,10 +296,14 @@
     },
     startTutoring: () => tutoring(""),
     submitAnswer: () => tutoring(value("studentAnswer")),
-    logScore: () => apiCall("/student/log-score", studentParams(Object.assign(courseActivity(), {
-      score: numberValue("studentScore"),
-      meta: value("scoreMeta"),
-    }))),
+    logScore: async () => {
+      const result = await apiCall("/student/log-score", studentParams(Object.assign(courseActivity(), {
+        score: numberValue("studentScore"),
+        meta: value("scoreMeta"),
+      })));
+      renderStudentState(result.data);
+      return result;
+    },
     badInstructorListActivities: () => expectedFailure("/instructor/list-activities", {
       email: value("badInstructorEmail"),
       password: value("badInstructorPassword"),
@@ -277,7 +330,6 @@
 
   async function expectedFailure(path, params) {
     const result = await apiCall(path, params);
-    renderJson("negativeOut", result.data);
     const [label, kind] = classify(result.data, "expectedFailure");
     setBadge(el("lastBadge"), label, kind);
     return result;
@@ -286,124 +338,304 @@
   async function tutoring(answer) {
     const params = studentParams(courseActivity());
     if (answer) params.answer = answer;
+    addChat("student", answer || "Start / continue tutoring");
     const result = await apiCall("/student/submit-tutoring-answer", params);
-    addChat(answer ? "student" : "student", answer || "Start / continue tutoring");
-    const guidance = result.data && (result.data.assistant_response || result.data.guidance || result.data.message || result.data.response);
-    addChat("assistant", guidance || format(result.data));
+    const response = result.data || {};
+    const guidance = response.assistant_response || response.guidance || response.message || response.response || response.feedback;
+    addChat("assistant", guidance || format(response));
+    renderStudentState(response);
     return result;
   }
 
   function addChat(kind, text) {
-    const msg = document.createElement("div");
-    msg.className = "message " + kind;
-    msg.textContent = text;
-    el("chatPanel").appendChild(msg);
+    const node = document.createElement("div");
+    node.className = "message " + kind;
+    node.textContent = text;
+    el("chatPanel").appendChild(node);
+    el("chatPanel").scrollTop = el("chatPanel").scrollHeight;
   }
 
   function renderActivity(data) {
-    const display = el("activityDisplay");
     const activity = data && (data.activity || data);
     const text = activity && (activity.activity_text || activity.text || activity.content);
-    display.textContent = text ? text : "No activity content found in response.";
+    el("activityDisplay").textContent = text || "No student-facing activity text found in response.";
     const leaked = !!(activity && activity.learning_objectives);
-    el("objectiveWarning").className = leaked ? "notice badge badge-error" : "notice badge badge-warning";
-    el("objectiveWarning").textContent = leaked
-      ? "Warning: response contains learning_objectives."
-      : "Learning objectives should not be exposed to student.";
+    const warning = el("objectiveWarning");
+    warning.className = leaked ? "integrity-pill error" : "integrity-pill success";
+    warning.textContent = leaked
+      ? "Problem: learning objectives exposed to student."
+      : "Hidden instructional fields are not exposed.";
   }
 
-  async function runAction(name, outputId) {
-    const result = await actions[name]();
-    if (outputId) renderJson(outputId, result.data);
-    return result;
+  function renderStudentState(data) {
+    const bits = [];
+    ["score", "state", "status", "current_state"].forEach((key) => {
+      if (data && data[key] !== undefined) bits.push(key + ": " + data[key]);
+    });
+    el("studentStateDisplay").textContent = bits.length ? bits.join(" | ") : "No score/state returned";
+  }
+
+  function rowsFrom(data, keys) {
+    if (!data || typeof data !== "object") return [];
+    for (const key of keys) {
+      if (Array.isArray(data[key])) return data[key];
+    }
+    if (Array.isArray(data)) return data;
+    return [];
+  }
+
+  function renderTable(targetId, rows, columns, emptyText, onRowClick) {
+    const target = el(targetId);
+    if (!rows.length) {
+      target.className = "data-zone empty";
+      target.textContent = emptyText;
+      return;
+    }
+    target.className = "data-zone";
+    const table = document.createElement("table");
+    table.className = "data-table";
+    const head = document.createElement("thead");
+    head.innerHTML = "<tr>" + columns.map((col) => "<th>" + col.label + "</th>").join("") + "</tr>";
+    table.appendChild(head);
+    const body = document.createElement("tbody");
+    rows.forEach((row) => {
+      const tr = document.createElement("tr");
+      if (onRowClick) tr.className = "click-row";
+      columns.forEach((col) => {
+        const td = document.createElement("td");
+        const val = row[col.key];
+        td.textContent = Array.isArray(val) ? val.join(", ") : val == null ? "" : String(val);
+        tr.appendChild(td);
+      });
+      if (onRowClick) tr.addEventListener("click", () => onRowClick(row));
+      body.appendChild(tr);
+    });
+    table.appendChild(body);
+    target.replaceChildren(table);
+  }
+
+  function renderCourses(data) {
+    const rows = rowsFrom(data, ["courses", "data", "items"]);
+    renderTable("coursesDisplay", rows, [
+      { key: "course_id", label: "Course ID" },
+      { key: "course_name", label: "Name" },
+      { key: "id", label: "Internal ID" },
+    ], "No courses returned.", (row) => {
+      setValue("courseId", row.course_id || row.id || "");
+      setBadge(el("globalStatus"), "Course selected", "success");
+    });
+  }
+
+  function renderActivities(data) {
+    const rows = rowsFrom(data, ["activities", "data", "items"]);
+    const single = data && data.activity ? [data.activity] : [];
+    renderTable("activitiesDisplay", rows.length ? rows : single, [
+      { key: "activity_no", label: "No" },
+      { key: "status", label: "Status" },
+      { key: "activity_text", label: "Activity text" },
+      { key: "learning_objectives", label: "Objectives" },
+    ], "No activities returned.", (row) => {
+      if (row.activity_no !== undefined) setValue("activityNo", row.activity_no);
+    });
+  }
+
+  function renderScores(data) {
+    if (!latestCsv) {
+      renderTable("scoresDisplay", [], [], "No CSV returned.");
+      return;
+    }
+    const rows = csvRows(latestCsv);
+    renderTable("scoresDisplay", rows, [
+      { key: "student_id", label: "Student ID" },
+      { key: "student_email", label: "Email" },
+      { key: "activity_no", label: "Activity" },
+      { key: "score", label: "Score" },
+      { key: "meta", label: "Meta" },
+    ], "No score rows found.");
+  }
+
+  function csvRows(csvText) {
+    const lines = csvText.trim().split(/\r?\n/);
+    if (lines.length < 2) return [];
+    const headers = lines[0].split(",");
+    return lines.slice(1).map((line) => {
+      const values = line.split(",");
+      const row = {};
+      headers.forEach((header, index) => {
+        row[header] = values[index] || "";
+      });
+      return row;
+    });
+  }
+
+  function classify(data, expected) {
+    if (expected === "expectedFailure") {
+      return data && data.ok === false ? ["EXPECTED FAIL", "warning"] : ["UNEXPECTED", "error"];
+    }
+    if (expected === "postResetFailure") {
+      const error = String((data && data.error) || "").toLowerCase();
+      const pass = data && data.ok === false && (
+        error.includes("not active") ||
+        error.includes("activity is not active") ||
+        error.includes("ended")
+      );
+      return pass ? ["PASS", "success"] : ["FAIL", "error"];
+    }
+    return data && data.ok === true ? ["PASS", "success"] : ["FAIL", "error"];
   }
 
   function initFlow() {
     const list = el("demoFlow");
     flowSteps.forEach((step, index) => {
-      const [title, endpoint, action, expected] = step;
+      const [title, explanation, endpoint, action, expected] = step;
       const item = document.createElement("li");
       item.className = "flow-card";
-      item.innerHTML = '<div class="flow-title"><strong>' + title + '</strong><span class="badge badge-neutral" id="flowBadge' + index + '">Not run</span></div>' +
-        '<div class="endpoint">' + endpoint + '</div>' +
+      item.innerHTML =
+        '<div class="flow-title">' +
+        '<div class="flow-number">' + (index + 1) + '</div>' +
+        '<div><strong>' + title + '</strong><p class="quiet">' + explanation + '</p><div class="endpoint">' + endpoint + '</div></div>' +
+        '<span class="badge badge-neutral" id="flowBadge' + index + '">Not run</span>' +
+        '</div>' +
         '<button data-flow="' + index + '">Run step</button>' +
-        '<pre class="request-summary" id="flowSummary' + index + '"></pre>' +
-        '<pre class="flow-response" id="flowResponse' + index + '"></pre>';
+        '<pre class="output" id="flowSummary' + index + '"></pre>' +
+        '<pre class="output" id="flowResponse' + index + '"></pre>';
       list.appendChild(item);
       item.querySelector("button").addEventListener("click", async () => {
         const result = await actions[action]();
-        el("flowSummary" + index).textContent = format(result.requestSummary);
-        el("flowResponse" + index).textContent = format(result.data);
+        renderTo("flowSummary" + index, result.requestSummary);
+        renderTo("flowResponse" + index, result.data);
         const [label, kind] = classify(result.data, expected);
         setBadge(el("flowBadge" + index), label, kind);
       });
     });
   }
 
+  async function runAction(name) {
+    const result = await actions[name]();
+    renderTo(visibleOutputForAction(name), result.data);
+    return result;
+  }
+
+  function renderHistory() {
+    const target = el("historyList");
+    if (!target) return;
+    if (!history.length) {
+      target.className = "history-list empty";
+      target.textContent = "No requests yet.";
+      return;
+    }
+    target.className = "history-list";
+    target.replaceChildren(...history.map((item) => {
+      const div = document.createElement("div");
+      div.className = "history-item";
+      div.innerHTML = "<strong>" + item.request.method + " " + item.request.path + "</strong>" +
+        "<span class=\"quiet\">" + item.at + "</span>" +
+        "<pre class=\"output\">" + escapeHtml(format({ request: item.request, response: item.response })) + "</pre>";
+      return div;
+    }));
+  }
+
+  function escapeHtml(text) {
+    return String(text).replace(/[&<>"']/g, (char) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#039;",
+    }[char]));
+  }
+
   function saveFields() {
     const safe = {};
     const passwords = {};
-    fields.forEach((id) => {
-      if (passwordFields.has(id)) passwords[id] = value(id);
+    setupFields.forEach((id) => {
+      if (passwordKeys.has(id)) passwords[id] = value(id);
       else safe[id] = value(id);
     });
     localStorage.setItem(safeStorageKey, JSON.stringify(safe));
-    if (el("rememberPasswords").checked) {
-      localStorage.setItem(passwordStorageKey, JSON.stringify(passwords));
-    } else {
-      localStorage.removeItem(passwordStorageKey);
-    }
-    setBadge(el("globalStatus"), "Saved", "success");
+    if (el("rememberPasswords").checked) localStorage.setItem(passwordStorageKey, JSON.stringify(passwords));
+    else localStorage.removeItem(passwordStorageKey);
+    setBadge(el("globalStatus"), "Demo fields saved", "success");
+    updateReadyCard();
   }
 
   function loadFields() {
-    el("baseUrl").value = window.location.origin;
+    setValue("baseUrl", window.location.origin || "http://127.0.0.1:8000");
     const safe = JSON.parse(localStorage.getItem(safeStorageKey) || "{}");
     const passwords = JSON.parse(localStorage.getItem(passwordStorageKey) || "{}");
-    Object.entries(Object.assign({}, safe, passwords)).forEach(([id, val]) => {
-      if (el(id)) el(id).value = val;
-    });
+    Object.entries(Object.assign({}, safe, passwords)).forEach(([id, next]) => setValue(id, next));
     el("rememberPasswords").checked = Object.keys(passwords).length > 0;
+    if (!value("activityNo")) setValue("activityNo", "1");
+    updateReadyCard();
   }
 
   function clearFields() {
     localStorage.removeItem(safeStorageKey);
     localStorage.removeItem(passwordStorageKey);
-    fields.forEach((id) => {
-      if (el(id)) el(id).value = id === "baseUrl" ? window.location.origin : "";
-    });
-    el("activityNo").value = "1";
+    setupFields.forEach((id) => setValue(id, id === "baseUrl" ? (window.location.origin || "http://127.0.0.1:8000") : ""));
+    setValue("activityNo", "1");
     el("rememberPasswords").checked = false;
-    setBadge(el("globalStatus"), "Cleared", "warning");
+    setBadge(el("globalStatus"), "Saved fields cleared", "warning");
+    updateReadyCard();
+  }
+
+  function updateReadyCard() {
+    const missing = requiredDemoFields.filter((id) => !value(id));
+    const card = el("readyCard");
+    if (!card) return;
+    if (missing.length === 0) {
+      card.className = "ready-card success";
+      card.innerHTML = "<strong>Ready for demo</strong><span>Required credentials and activity identifiers are filled.</span>";
+    } else {
+      card.className = "ready-card warning";
+      card.innerHTML = "<strong>Required fields missing</strong><span>Missing: " + missing.join(", ") + "</span>";
+    }
+  }
+
+  function initNavigation() {
+    document.querySelectorAll("[data-view-target]").forEach((button) => {
+      button.addEventListener("click", () => {
+        document.querySelectorAll("[data-view-target]").forEach((nav) => nav.classList.remove("active"));
+        document.querySelectorAll(".view").forEach((view) => view.classList.remove("active-view"));
+        button.classList.add("active");
+        el(button.dataset.viewTarget).classList.add("active-view");
+      });
+    });
   }
 
   function initButtons() {
     document.querySelectorAll("[data-action]").forEach((button) => {
-      button.addEventListener("click", async () => {
-        const action = button.getAttribute("data-action");
-        let output = "instructorOut";
-        if (action === "health") output = "healthOut";
-        if (["studentLogin", "setStudentPassword", "changeStudentPassword", "getActivity", "startTutoring", "submitAnswer", "logScore"].includes(action)) output = "studentOut";
-        if (action.startsWith("bad")) output = "negativeOut";
-        await runAction(action, output);
-      });
+      button.addEventListener("click", () => runAction(button.dataset.action));
     });
     el("saveDemoFields").addEventListener("click", saveFields);
     el("clearDemoFields").addEventListener("click", clearFields);
-    el("downloadCsv").addEventListener("click", () => {
-      const blob = new Blob([latestCsv], { type: "text/csv" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = "scores.csv";
-      link.click();
-      URL.revokeObjectURL(url);
+    el("clearHistory").addEventListener("click", () => {
+      history.length = 0;
+      renderHistory();
     });
+    el("exportHistory").addEventListener("click", () => downloadText("request-history.json", JSON.stringify(history, null, 2), "application/json"));
+    el("downloadCsv").addEventListener("click", () => downloadText("scores.csv", latestCsv, "text/csv"));
+    setupFields.forEach((id) => {
+      const node = el(id);
+      if (node) node.addEventListener("input", updateReadyCard);
+    });
+  }
+
+  function downloadText(filename, text, type) {
+    const blob = new Blob([text || ""], { type });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
   }
 
   document.addEventListener("DOMContentLoaded", () => {
     loadFields();
+    initNavigation();
     initButtons();
     initFlow();
+    renderHistory();
   });
 }());
