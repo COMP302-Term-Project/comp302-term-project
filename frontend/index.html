@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>InClass Platform Demo UI</title>
+  <link rel="stylesheet" href="/ui-static/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>InClass Platform Demo UI</h1>
+      <p class="warning">Passwords are never shown in logs. This UI calls the FastAPI backend only.</p>
+    </div>
+    <div id="globalStatus" class="badge badge-neutral">Ready</div>
+  </header>
+
+  <main class="layout">
+    <aside class="panel sticky">
+      <h2>Demo Setup / Credentials</h2>
+      <div class="field"><label for="baseUrl">Backend base URL</label><input id="baseUrl" data-save value=""></div>
+      <div class="field"><label for="instructorEmail">Instructor email</label><input id="instructorEmail" data-save type="email" autocomplete="username"></div>
+      <div class="field"><label for="instructorPassword">Instructor password</label><input id="instructorPassword" type="password" autocomplete="current-password"></div>
+      <div class="field"><label for="studentEmail">Student email</label><input id="studentEmail" data-save type="email" autocomplete="username"></div>
+      <div class="field"><label for="studentPassword">Student password</label><input id="studentPassword" type="password" autocomplete="current-password"></div>
+      <div class="grid-two">
+        <div class="field"><label for="courseId">Course ID</label><input id="courseId" data-save placeholder="CS101"></div>
+        <div class="field"><label for="activityNo">Activity no</label><input id="activityNo" data-save type="number" min="1" value="1"></div>
+        <div class="field"><label for="studentId">Student ID</label><input id="studentId" data-save type="number" min="1"></div>
+        <div class="field"><label for="resetStudentEmail">Student email for reset password</label><input id="resetStudentEmail" data-save type="email"></div>
+      </div>
+      <label class="check"><input id="rememberPasswords" type="checkbox"> Remember passwords on this browser for local demo only</label>
+      <div class="button-row">
+        <button id="saveDemoFields">Save non-password demo fields</button>
+        <button id="clearDemoFields" class="secondary">Clear saved demo fields</button>
+      </div>
+    </aside>
+
+    <section class="content">
+      <section class="panel">
+        <div class="section-head">
+          <h2>System Health</h2>
+          <button data-action="health">Check API health</button>
+        </div>
+        <div id="healthBadge" class="badge badge-neutral">Not checked</div>
+        <pre id="healthOut" class="output"></pre>
+      </section>
+
+      <section class="panel">
+        <h2>Instructor Panel</h2>
+        <div class="actions">
+          <button data-action="instructorLogin">Instructor login</button>
+          <button data-action="setInstructorPassword">Set instructor password</button>
+          <button data-action="changeInstructorPassword">Change instructor password</button>
+          <button data-action="listMyCourses">List my courses</button>
+          <button data-action="listActivities">List activities</button>
+        </div>
+        <div class="grid-two">
+          <div class="field"><label for="instructorOldPassword">Old instructor password</label><input id="instructorOldPassword" type="password"></div>
+          <div class="field"><label for="instructorNewPassword">New instructor password</label><input id="instructorNewPassword" type="password"></div>
+        </div>
+
+        <h3>Create activity</h3>
+        <div class="field"><label for="activityText">Activity text</label><textarea id="activityText" rows="4">Explain the main idea in your own words.</textarea></div>
+        <div class="field"><label for="learningObjectives">Learning objectives, one per line</label><textarea id="learningObjectives" rows="3">Identify the concept
+Apply it to a short example</textarea></div>
+        <div class="field small"><label for="optionalActivityNo">Optional activity no</label><input id="optionalActivityNo" type="number" min="1"></div>
+        <button data-action="createActivity">Create activity</button>
+
+        <h3>Update activity</h3>
+        <div class="field"><label for="updateActivityText">Optional new activity_text</label><textarea id="updateActivityText" rows="3"></textarea></div>
+        <div class="field"><label for="updateLearningObjectives">Optional new learning_objectives, one per line</label><textarea id="updateLearningObjectives" rows="3"></textarea></div>
+        <button data-action="updateActivity">Update activity</button>
+
+        <h3>Activity state and grading</h3>
+        <div class="actions">
+          <button data-action="startActivity">Start activity</button>
+          <button data-action="endActivity">End activity</button>
+          <button data-action="resetActivity">Reset activity</button>
+          <button data-action="exportScores">Export scores</button>
+        </div>
+        <div id="csvTools" class="csv-tools hidden">
+          <button id="downloadCsv" class="secondary">Download CSV</button>
+          <details><summary>Returned CSV</summary><pre id="csvOut"></pre></details>
+        </div>
+        <div class="grid-two">
+          <div class="field"><label for="resetNewPassword">Reset student new password</label><input id="resetNewPassword" type="password"></div>
+          <div class="field"><label for="manualScore">Manual grade score</label><input id="manualScore" type="number" step="0.01" value="1"></div>
+        </div>
+        <div class="field"><label for="manualReason">Manual grade reason</label><input id="manualReason" value="Demo manual grade"></div>
+        <div class="actions">
+          <button data-action="resetStudentPassword">Reset student password</button>
+          <button data-action="manualGrade">Manual grade</button>
+        </div>
+        <pre id="instructorOut" class="output"></pre>
+      </section>
+
+      <section class="panel">
+        <h2>Student Panel</h2>
+        <div class="actions">
+          <button data-action="studentLogin">Student login</button>
+          <button data-action="setStudentPassword">Set student password</button>
+          <button data-action="changeStudentPassword">Change student password</button>
+          <button data-action="getActivity">Get activity</button>
+        </div>
+        <div class="grid-two">
+          <div class="field"><label for="studentOldPassword">Old student password</label><input id="studentOldPassword" type="password"></div>
+          <div class="field"><label for="studentNewPassword">New student password</label><input id="studentNewPassword" type="password"></div>
+        </div>
+        <p id="objectiveWarning" class="notice">Learning objectives should not be exposed to student.</p>
+        <div id="activityDisplay" class="activity-display"></div>
+        <h3>Tutoring chat</h3>
+        <div id="chatPanel" class="chat-panel"></div>
+        <div class="field"><label for="studentAnswer">Answer</label><textarea id="studentAnswer" rows="3"></textarea></div>
+        <div class="actions">
+          <button data-action="startTutoring">Start / continue tutoring</button>
+          <button data-action="submitAnswer">Submit answer</button>
+        </div>
+        <h3>Log score</h3>
+        <div class="grid-two">
+          <div class="field"><label for="studentScore">Score</label><input id="studentScore" type="number" step="0.01" value="1"></div>
+          <div class="field"><label for="scoreMeta">Meta</label><input id="scoreMeta" value="demo"></div>
+        </div>
+        <button data-action="logScore">Log score</button>
+        <pre id="studentOut" class="output"></pre>
+      </section>
+
+      <section class="panel">
+        <h2>Demo Flow</h2>
+        <ol id="demoFlow" class="flow-list"></ol>
+      </section>
+
+      <section class="panel">
+        <h2>Negative Tests</h2>
+        <div class="grid-two">
+          <div class="field"><label for="badInstructorEmail">Unauthorized instructor email</label><input id="badInstructorEmail" data-save type="email"></div>
+          <div class="field"><label for="badInstructorPassword">Unauthorized instructor password</label><input id="badInstructorPassword" type="password"></div>
+          <div class="field"><label for="badStudentEmail">Unauthorized student email</label><input id="badStudentEmail" data-save type="email"></div>
+          <div class="field"><label for="badStudentPassword">Unauthorized student password</label><input id="badStudentPassword" type="password"></div>
+        </div>
+        <div class="actions">
+          <button data-action="badInstructorListActivities">Unauthorized instructor tries list activities</button>
+          <button data-action="badInstructorResetActivity">Unauthorized instructor tries reset activity</button>
+          <button data-action="badInstructorManualGrade">Unauthorized instructor tries manual grade</button>
+          <button data-action="badStudentGetActivity">Unauthorized student tries get activity</button>
+        </div>
+        <pre id="negativeOut" class="output"></pre>
+      </section>
+    </section>
+
+    <aside class="panel sticky last">
+      <h2>Last Response</h2>
+      <div id="lastBadge" class="badge badge-neutral">No response yet</div>
+      <pre id="lastSummary" class="request-summary"></pre>
+      <pre id="lastResponse" class="output tall"></pre>
+    </aside>
+  </main>
+
+  <script src="/ui-static/app.js" defer></script>
+</body>
+</html>

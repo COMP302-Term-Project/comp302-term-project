@@ -2,13 +2,23 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
   
 app = FastAPI()
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+FRONTEND_DIR = PROJECT_ROOT / "frontend"
+
+app.mount("/ui-static", StaticFiles(directory=FRONTEND_DIR), name="ui-static")
 
 
 @app.get("/")
 def root() -> dict:
     return {"ok": True, "message": "InClass Platform API"}
+
+
+@app.get("/ui")
+def demoUi() -> FileResponse:
+    return FileResponse(FRONTEND_DIR / "index.html")
 
 
 # ==========================================
