@@ -727,6 +727,19 @@ def endActivity(email: str, password: str, course_id: str, activity_no: int) -> 
     return _changeActivityState(email, password, course_id, activity_no, "ENDED", ["ACTIVE"])
 
 
+def _delete_activity_score_logs(db, course_db_id: int, activity_no: int) -> None:
+    db.table("score_logs").delete().eq("course_id", course_db_id).eq("activity_no", activity_no).execute()
+
+
+def _delete_activity_conversation_state(db, course_db_id: int, activity_no: int) -> None:
+    db.table("conversation_state").delete().eq("course_id", course_db_id).eq("activity_no", activity_no).execute()
+
+
+def _cleanup_activity_runtime_state(db, course_db_id: int, activity_no: int) -> None:
+    _delete_activity_score_logs(db, course_db_id, activity_no)
+    _delete_activity_conversation_state(db, course_db_id, activity_no)
+
+
 # --- Export API (produces csv document) ---
 def exportScores(email: str, password: str, course_id: str, activity_no: int) -> dict:
     raise NotImplementedError
