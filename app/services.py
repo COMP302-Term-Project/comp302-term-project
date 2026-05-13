@@ -500,6 +500,33 @@ def _get_student_score(db, student_id: int, course_id: int, activity_no: int) ->
     return sum(record.get("score", 0.0) for record in scores_resp.data) if scores_resp.data else 0.0
 
 
+def _normalize_score_meta(value: object) -> str:
+    if _is_blank(value):
+        return ""
+    return " ".join(str(value).strip().lower().split())
+
+
+def _find_existing_score_log(db, student_id: int, course_id: int, activity_no: int, meta: str) -> dict | None:
+    normalized_meta = _normalize_score_meta(meta)
+    if not normalized_meta:
+        return None
+
+    scores_resp = (
+        db.table("score_logs")
+        .select("*")
+        .eq("student_id", student_id)
+        .eq("course_id", course_id)
+        .eq("activity_no", activity_no)
+        .execute()
+    )
+
+    for score_log in scores_resp.data or []:
+        if _normalize_score_meta(score_log.get("meta")) == normalized_meta:
+            return score_log
+
+    return None
+
+
 def _last_assistant_response(history: list[dict[str, str]]) -> str | None:
     for message in reversed(history):
         if message["role"] == "assistant":
@@ -661,8 +688,9 @@ def submitTutoringAnswer(
     if meta:
         existing_score = db.table("score_logs").select("id").eq("student_id", student["id"]).eq("course_id", course["id"]).eq("activity_no", activity_no).eq("meta", meta).execute()
         if not existing_score.data:
-            logScore(email, password, course["course_id"], activity_no, 1.0, meta)
-            current_score += 1.0
+            score_result = logScore(email, password, course["course_id"], activity_no, 1.0, meta)
+            if score_result.get("ok") and not score_result.get("duplicate"):
+                current_score += 1.0
             
     history.append({"role": "assistant", "content": response_text})
     _save_conversation_history(db, student["id"], course["id"], activity_no, history)
@@ -690,12 +718,23 @@ def logScore(email: str, password: str, course_id: str, activity_no: int, score:
     if score <= 0:
         return {"ok": False, "error": "Score must be positive"}
 
+    if score != 1.0:
+        return {"ok": False, "error": "Objective score must be exactly 1"}
+
+    if _is_blank(meta):
+        return {"ok": False, "error": "meta is required"}
+
+    meta_text = str(meta).strip()
+    existing_score = _find_existing_score_log(db, student["id"], course["id"], activity_no, meta_text)
+    if existing_score:
+        return {"ok": True, "score_log": existing_score, "duplicate": True}
+
     insert_data = {
         "student_id": student["id"],
         "course_id": course["id"],
         "activity_no": activity_no,
         "score": score,
-        "meta": meta or ""
+        "meta": meta_text
     }
 
     insert_res = db.table("score_logs").insert(insert_data).execute()
@@ -1104,6 +1143,20 @@ def manualGradeStudent(
     # only ACTIVE activities can be graded
     if activity.get("status") != "ACTIVE":
         return {"ok": False, "error": "Activity is not active"}
+
+    student_resp = db.table("students").select("id").eq("id", student_id).execute()
+    if not student_resp.data:
+        return {"ok": False, "error": "Student not found"}
+
+    enrollment_resp = (
+        db.table("student_courses")
+        .select("id")
+        .eq("student_id", student_id)
+        .eq("course_id", course["id"])
+        .execute()
+    )
+    if not enrollment_resp.data:
+        return {"ok": False, "error": "Student is not enrolled in this course"}
 
     # call database function
     db.rpc(
