@@ -10,6 +10,7 @@ class FakeQueryBuilder:
         self.filters = {}
         self.insert_data = None
         self.update_data = None
+        self.delete_requested = False
         self.order_column = None
         self.order_desc = False
         self.limit_count = None
@@ -43,6 +44,10 @@ class FakeQueryBuilder:
         self.update_data = dict(data)
         return self
 
+    def delete(self):
+        self.delete_requested = True
+        return self
+
     def execute(self):
         rows = self.db.tables.setdefault(self.table_name, [])
 
@@ -74,6 +79,20 @@ class FakeQueryBuilder:
 
         if self.limit_count is not None:
             matched_rows = matched_rows[:self.limit_count]
+
+        if self.delete_requested:
+            self.db.tables[self.table_name] = [
+                row
+                for row in rows
+                if not all(row.get(column) == value for column, value in self.filters.items())
+            ]
+            self.db.deletes.append(
+                {
+                    "table": self.table_name,
+                    "filters": dict(self.filters),
+                }
+            )
+            return FakeResponse(matched_rows)
 
         if self.update_data is not None:
             for row in matched_rows:
@@ -115,6 +134,7 @@ class FakeDB:
         self.tables.update({name: rows for name, rows in tables.items()})
         self.inserts = []
         self.updates = []
+        self.deletes = []
         self.rpc_calls = []
 
     def table(self, name):
