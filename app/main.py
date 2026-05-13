@@ -204,6 +204,23 @@ def endActivity(
         activity_no=activity_no
     )
 
+# S2-T19 [US-M] - Implement resetActivity route
+@app.post("/instructor/reset-activity")
+def resetActivity(
+    *,
+    email: str,
+    password: str,
+    course_id: str,
+    activity_no: int,
+) -> dict:
+    from app import services
+    return services.resetActivity(
+        email=email,
+        password=password,
+        course_id=course_id,
+        activity_no=activity_no,
+    )
+
 # S2-T14 [US-L] - Implement and route manualGradeStudent
 @app.post("/instructor/manual-grade")
 def manualGradeStudent(
