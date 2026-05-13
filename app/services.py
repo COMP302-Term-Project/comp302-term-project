@@ -747,7 +747,19 @@ def exportScores(email: str, password: str, course_id: str, activity_no: int) ->
 
 # --- Reset API (deletes all scores for given activity_no) ---
 def resetActivity(email: str, password: str, course_id: str, activity_no: int) -> dict:
-    raise NotImplementedError
+    auth_check = _verify_instructor_course_access(email, password, course_id)
+    if not auth_check.get("ok"):
+        return auth_check
+
+    db = get_db()
+    course = auth_check["course"]
+    exist = db.table("activities").select("*").eq("course_id", course["id"]).eq("activity_no", activity_no).execute()
+    if not exist.data:
+        return {"ok": False, "error": "Activity does not exist"}
+
+    _cleanup_activity_runtime_state(db, course["id"], activity_no)
+    db.table("activities").update({"status": "ENDED"}).eq("course_id", course["id"]).eq("activity_no", activity_no).execute()
+    return {"ok": True, "message": "Activity reset"}
 
 
 # --- Student Password Reset API ---
