@@ -105,7 +105,6 @@
     if ([
       "studentLogin", "setStudentPassword", "changeStudentPassword",
       "getActivity", "startTutoring", "submitAnswer", "logScore",
-      "googleLoginStudent",
     ].includes(action)) {
       return "studentOut";
     }
@@ -193,14 +192,10 @@
       new_password: value("instructorNewPassword"),
     })),
 
-    // ── Google federated auth ────────────────────────────────────
-    googleLoginInstructor: () => apiCall("/auth/google-login", {}, {
+    // ── Google federated auth (called from GIS callback, not buttons) ──
+    googleLogin: (idToken, role) => apiCall("/auth/google-login", {}, {
       method: "POST",
-      body: { id_token: value("googleIdTokenInstructor"), role: "instructor" },
-    }),
-    googleLoginStudent: () => apiCall("/auth/google-login", {}, {
-      method: "POST",
-      body: { id_token: value("googleIdTokenStudent"), role: "student" },
+      body: { id_token: idToken, role },
     }),
 
     // ── Instructor course / activity ─────────────────────────────
@@ -527,14 +522,86 @@
     });
   }
 
-  // ── Toggle buttons (data-toggle shows/hides target element) ──
-  function initToggleButtons() {
-    document.querySelectorAll("[data-toggle]").forEach((button) => {
+  // ── Google Identity Services ───────────────────────────────────
+  let pendingGoogleRole = null;
+
+  function setGoogleStatus(role, message, kind) {
+    const statusEl = el(role === "instructor" ? "googleStatusInstructor" : "googleStatusStudent");
+    if (!statusEl) return;
+    statusEl.textContent = message;
+    statusEl.className = "google-status" + (kind ? " " + kind : "");
+    statusEl.classList.remove("hidden");
+  }
+
+  function initGoogleIdentityServices(clientId) {
+    if (!window.google || !window.google.accounts || !window.google.accounts.id) return;
+
+    window.google.accounts.id.initialize({
+      client_id: clientId,
+      callback: async function (response) {
+        const role = pendingGoogleRole || "student";
+        if (!response || !response.credential) {
+          setGoogleStatus(role, "No credential returned by Google.", "fail");
+          return;
+        }
+        setGoogleStatus(role, "Verifying with backend…", "");
+        const result = await actions.googleLogin(response.credential, role);
+        const ok = result.data && result.data.ok;
+        setGoogleStatus(role,
+          ok ? "Signed in with Google." : "Backend rejected: " + (result.data && result.data.error),
+          ok ? "ok" : "fail");
+        renderTo(role === "instructor" ? "instructorOut" : "studentOut", result.data);
+      },
+      auto_select: false,
+      cancel_on_tap_outside: true,
+    });
+  }
+
+  function initGoogleButtons() {
+    document.querySelectorAll("[data-google-role]").forEach((button) => {
       button.addEventListener("click", () => {
-        const target = el(button.dataset.toggle);
-        if (target) target.classList.toggle("hidden");
+        const role = button.dataset.googleRole;
+        pendingGoogleRole = role;
+
+        if (!window.google || !window.google.accounts || !window.google.accounts.id) {
+          setGoogleStatus(role, "Google Identity Services not yet loaded — check your connection.", "fail");
+          return;
+        }
+
+        setGoogleStatus(role, "Opening Google sign-in…", "");
+        window.google.accounts.id.prompt((notification) => {
+          if (notification.isNotDisplayed()) {
+            setGoogleStatus(role,
+              "Sign-in dialog blocked (" + notification.getNotDisplayedReason() + "). " +
+              "Add this origin to Authorized JavaScript Origins in Google Cloud Console.",
+              "fail");
+          } else if (notification.isSkippedMoment()) {
+            setGoogleStatus(role, "Dismissed — click again to retry.", "fail");
+          }
+        });
       });
     });
+  }
+
+  async function loadGoogleClientId() {
+    try {
+      const resp = await fetch(baseUrl() + "/auth/google-client-id");
+      if (!resp.ok) return;
+      const data = await resp.json();
+      if (!data.client_id) return;
+
+      const clientId = data.client_id;
+      const tryInit = () => {
+        if (window.google && window.google.accounts && window.google.accounts.id) {
+          initGoogleIdentityServices(clientId);
+        } else {
+          setTimeout(tryInit, 300);
+        }
+      };
+      tryInit();
+    } catch (_) {
+      // GIS unavailable (offline) — silent fail, buttons just won't render.
+    }
   }
 
   // ── Main navigation ────────────────────────────────────────────
@@ -667,9 +734,10 @@
     loadFields();
     initNavigation();
     initInnerTabs();
-    initToggleButtons();
     initButtons();
+    initGoogleButtons();
     initFlow();
     renderHistory();
+    loadGoogleClientId();
   });
 }());

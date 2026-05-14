@@ -33,10 +33,13 @@ def googleLogin(payload: dict) -> dict:
     return services.googleLogin(id_token=id_token, role=payload.get("role"))
 
 
-@app.get("/auth/google-test-page")
-def googleTestPage() -> FileResponse:
-    page_path = Path(__file__).parent / "static" / "google_id_token_test_page.html"
-    return FileResponse(page_path)
+@app.get("/auth/google-client-id")
+def googleClientId() -> dict:
+    import os
+    client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
+    if not client_id:
+        return {"ok": False, "client_id": "", "error": "GOOGLE_CLIENT_ID is not configured"}
+    return {"ok": True, "client_id": client_id}
 
 
 # ==========================================
