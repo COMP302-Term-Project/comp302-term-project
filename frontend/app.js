@@ -36,6 +36,9 @@
   ];
   const history = [];
   let latestCsv = "";
+  let currentActivityLabel = "";
+  const demoTutoringStarter = "Can you guide me through this activity one question at a time?";
+  const demoTutoringAnswer = "Active retrieval practice is better than rereading because the student has to recall the idea from memory, so learning becomes stronger.";
 
   const flowSteps = [
     ["Check API health", "Confirm the FastAPI backend is reachable.", "/", "health", "success"],
@@ -46,9 +49,9 @@
     ["Create activity", "Create an instructor-controlled activity.", "/instructor/create-activity", "createActivity", "success"],
     ["Start activity", "Make the activity available to students.", "/instructor/start-activity", "startActivity", "success"],
     ["Student get active activity", "Load the student-facing activity text.", "/student/get-activity", "getActivity", "success"],
-    ["Student submit tutoring answer", "Send an answer into the AI tutoring flow.", "/student/submit-tutoring-answer", "submitAnswer", "success"],
-    ["Export scores", "Export score evidence as JSON/CSV.", "/instructor/export-scores", "exportScores", "success"],
+    ["Student submit tutoring answer", "Initialize tutoring, then send a deterministic scoring answer.", "/student/submit-tutoring-answer", "demoSubmitTutoringAnswer", "tutoringScore"],
     ["Manual grade", "Record an instructor grade.", "/instructor/manual-grade", "manualGrade", "success"],
+    ["Export scores", "Export score evidence as JSON/CSV.", "/instructor/export-scores", "exportScores", "success"],
     ["Reset activity", "Clear runtime score state and end the activity.", "/instructor/reset-activity", "resetActivity", "success"],
     ["Student tries logScore after reset", "Expected rejection because the activity is no longer active.", "/student/log-score", "logScore", "postResetFailure"],
   ];
@@ -100,7 +103,7 @@
   }
 
   function visibleOutputForAction(action) {
-    if (action === "health") return "setupOut";
+    if (["health", "seedDemoData", "resetDemoData"].includes(action)) return "setupOut";
     if (action.startsWith("bad")) return "negativeOut";
     if ([
       "studentLogin", "setStudentPassword", "changeStudentPassword",
@@ -207,6 +210,28 @@
       return result;
     },
 
+    seedDemoData: async () => {
+      const result = await apiCall("/demo/seed-data", {});
+      if (result.data && result.data.ok && result.data.demo) {
+        applySeededDemoFields(result.data.demo);
+        setBadge(el("globalStatus"), "Minimum demo data loaded", "success");
+      }
+      return result;
+    },
+
+    resetDemoData: async () => {
+      const confirmed = window.confirm(
+        "Reset demo data will delete rows from the application tables without dropping tables or changing schemas. Continue?"
+      );
+      if (!confirmed) return { data: { ok: false, message: "Reset demo data cancelled" }, requestSummary: null };
+      const result = await apiCall("/demo/reset-data", {});
+      if (result.data && result.data.ok) {
+        clearRuntimeDisplays();
+        setBadge(el("globalStatus"), "Demo data reset", "success");
+      }
+      return result;
+    },
+
     // ── Instructor auth ──────────────────────────────────────────
     instructorLogin: () => apiCall("/instructor/login", instructorParams()),
     setInstructorPassword: () => apiCall("/instructor/set-password", instructorParams()),
@@ -295,6 +320,30 @@
       return result;
     },
     startTutoring: () => tutoring(""),
+    demoSubmitTutoringAnswer: async () => {
+      const init = await apiCall("/student/submit-tutoring-answer", studentParams(Object.assign(courseActivity(), {
+        answer: demoTutoringStarter,
+      })));
+      const scoring = await apiCall("/student/submit-tutoring-answer", studentParams(Object.assign(courseActivity(), {
+        answer: demoTutoringAnswer,
+      })));
+      renderStudentState(scoring.data);
+      return {
+        data: {
+          ok: init.data && init.data.ok === true && scoring.data && scoring.data.ok === true,
+          initialization: init.data,
+          scoring: scoring.data,
+          state: scoring.data && scoring.data.state,
+        },
+        requestSummary: {
+          requests: [
+            { label: "Initialize tutoring flow", request: init.requestSummary },
+            { label: "Submit scoring answer", request: scoring.requestSummary },
+          ],
+        },
+        httpOk: init.httpOk && scoring.httpOk,
+      };
+    },
     submitAnswer: () => {
       const answer = value("studentAnswer");
       if (!answer) return Promise.resolve({ data: null });
@@ -342,13 +391,28 @@
   async function tutoring(answer) {
     const params = studentParams(courseActivity());
     if (answer) params.answer = answer;
+    ensureActivityHeader();
     addChat("student", answer || "Ask tutor / start tutoring");
     const result = await apiCall("/student/submit-tutoring-answer", params);
     const response = result.data || {};
+    if (!response.ok) {
+      updateActivityHeaderFromError(response);
+      addChatNotice(response.error || response.message || "Tutoring request failed. Check the evidence panel for details.");
+      renderStudentState(response);
+      return result;
+    }
     const guidance = response.assistant_response || response.guidance || response.message || response.response || response.feedback;
-    addChat("assistant", guidance || format(response));
+    if (guidance) addChat("assistant", guidance);
     renderStudentState(response);
     return result;
+  }
+
+  function cleanMarkdown(text) {
+    return String(text || "")
+      .replace(/\*\*(.*?)\*\*/g, "$1")
+      .replace(/__(.*?)__/g, "$1")
+      .replace(/`([^`]+)`/g, "$1")
+      .replace(/^\s{0,3}#{1,6}\s+/gm, "");
   }
 
   function addChat(kind, text) {
@@ -377,13 +441,23 @@
 
     const body = document.createElement("div");
     body.className = "message-body";
-    body.textContent = text;
+    body.textContent = cleanMarkdown(text);
     bubble.appendChild(body);
 
     wrapper.appendChild(bubble);
 
     const panel = el("chatPanel");
     panel.appendChild(wrapper);
+    panel.scrollTop = panel.scrollHeight;
+  }
+
+  function addChatNotice(text) {
+    const panel = el("chatPanel");
+    if (!panel) return;
+    const node = document.createElement("div");
+    node.className = "chat-notice";
+    node.textContent = cleanMarkdown(text);
+    panel.appendChild(node);
     panel.scrollTop = panel.scrollHeight;
   }
 
@@ -405,6 +479,13 @@
       }
     }
 
+    if (ok) {
+      currentActivityLabel = activityLabel("loaded");
+      setActivityHeader(currentActivityLabel);
+    } else if (currentActivityLabel) {
+      setActivityHeader(currentActivityLabel);
+    }
+
     const leaked = !!(activity && activity.learning_objectives);
     const warning = el("objectiveWarning");
     warning.className = leaked ? "integrity-pill error" : "integrity-pill success";
@@ -413,10 +494,46 @@
       : "Hidden instructional fields are not exposed.";
   }
 
+  function activityLabel(status) {
+    const course = value("courseId") || "Course";
+    const actNo = value("activityNo") || "?";
+    return course + " · Activity " + actNo + (status ? " " + status : "");
+  }
+
+  function setActivityHeader(text) {
+    const courseBadge = el("chatCourseBadge");
+    if (courseBadge) courseBadge.textContent = text;
+  }
+
+  function ensureActivityHeader() {
+    if (currentActivityLabel) {
+      setActivityHeader(currentActivityLabel);
+      return;
+    }
+    if (value("courseId") && value("activityNo")) {
+      currentActivityLabel = activityLabel("");
+      setActivityHeader(currentActivityLabel);
+    }
+  }
+
+  function updateActivityHeaderFromError(data) {
+    const error = String((data && data.error) || "").toLowerCase();
+    if (error.includes("not active") || error.includes("ended")) {
+      currentActivityLabel = activityLabel("ended");
+      setActivityHeader(currentActivityLabel);
+    } else if (currentActivityLabel) {
+      setActivityHeader(currentActivityLabel);
+    }
+  }
+
   function renderStudentState(data) {
     const bits = [];
-    ["score", "state", "status", "current_state"].forEach((key) => {
-      if (data && data[key] !== undefined) bits.push(key + ": " + data[key]);
+    if (data && data.state && typeof data.state === "object") {
+      if (data.state.score !== undefined) bits.push("score: " + data.state.score);
+      if (data.state.student_turns !== undefined) bits.push("turns: " + data.state.student_turns);
+    }
+    ["score", "status", "current_state"].forEach((key) => {
+      if (data && data[key] !== undefined && typeof data[key] !== "object") bits.push(key + ": " + data[key]);
     });
     const text = bits.length ? bits.join(" | ") : "No score/state returned";
     el("studentStateDisplay").textContent = text;
@@ -533,6 +650,15 @@
         error.includes("ended")
       );
       return pass ? ["PASS", "success"] : ["FAIL", "error"];
+    }
+    if (expected === "tutoringScore") {
+      const initScore = Number(data && data.initialization && data.initialization.state && data.initialization.state.score);
+      const scoringScore = Number(data && data.scoring && data.scoring.state && data.scoring.state.score);
+      const initOk = data && data.initialization && data.initialization.ok === true && Number.isFinite(initScore) && initScore === 0;
+      const scoringOk = data && data.scoring && data.scoring.ok === true && Number.isFinite(scoringScore) && scoringScore >= 1;
+      return data && data.ok === true && initOk && scoringOk
+        ? ["PASS", "success"]
+        : ["FAIL", "error"];
     }
     return data && data.ok === true ? ["PASS", "success"] : ["FAIL", "error"];
   }
@@ -823,6 +949,64 @@
     el("rememberPasswords").checked = false;
     setBadge(el("globalStatus"), "Saved fields cleared", "warning");
     updateReadyCard();
+  }
+
+  function applySeededDemoFields(demo) {
+    const instructorA = demo.instructorA || {};
+    const instructorB = demo.instructorB || {};
+    const student1 = demo.student1 || {};
+    const student2 = demo.student2 || {};
+    const course1 = demo.course1 || {};
+    const activity1 = demo.activity1 || {};
+    const mapping = {
+      instructorEmail: instructorA.email,
+      instructorPassword: instructorA.password,
+      studentEmail: student1.email,
+      studentPassword: student1.password,
+      courseId: course1.course_id,
+      activityNo: activity1.activity_no,
+      studentId: student1.id,
+      resetStudentEmail: student1.email,
+      badInstructorEmail: instructorB.email,
+      badInstructorPassword: instructorB.password,
+      badStudentEmail: student2.email,
+      badStudentPassword: student2.password,
+    };
+
+    Object.entries(mapping).forEach(([id, next]) => {
+      if (next !== undefined && next !== null) setValue(id, next);
+    });
+
+    const safe = JSON.parse(localStorage.getItem(safeStorageKey) || "{}");
+    Object.entries(mapping).forEach(([id, next]) => {
+      if (!passwordKeys.has(id) && next !== undefined && next !== null) safe[id] = String(next);
+    });
+    localStorage.setItem(safeStorageKey, JSON.stringify(safe));
+    const message = "Minimum demo data loaded: SE101 activity 1 is selected for the guided demo.";
+    const setupOut = el("setupOut");
+    if (setupOut) setupOut.textContent = message;
+    updateReadyCard();
+  }
+
+  function clearRuntimeDisplays() {
+    latestCsv = "";
+    currentActivityLabel = "";
+    setActivityHeader("No activity loaded");
+    const downloadCsv = el("downloadCsv");
+    if (downloadCsv) downloadCsv.classList.add("hidden");
+    const displays = {
+      coursesDisplay: "Courses will appear here. Click a row to select a course.",
+      activitiesDisplay: "Activities will appear here. Click a row to select an activity.",
+      scoresDisplay: "Exported score rows will appear here.",
+      activityDisplay: "No active activity loaded yet.",
+      studentStateDisplay: "No score yet",
+    };
+    Object.entries(displays).forEach(([id, text]) => {
+      const node = el(id);
+      if (!node) return;
+      node.classList.add("empty");
+      node.textContent = text;
+    });
   }
 
   function updateReadyCard() {

@@ -6,12 +6,12 @@ from fastapi.testclient import TestClient
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
 FORBIDDEN_FRONTEND_TOKENS = [
-    "SUPABASE_SERVICE_ROLE_KEY",
-    "DATABASE_URL",
-    "OPENROUTER_API_KEY",
-    "eyJhbGci",
-    "sk-or-",
-    "postgres://",
+    "SUPABASE" + "_SERVICE" + "_ROLE" + "_KEY",
+    "DATABASE" + "_URL",
+    "OPENROUTER" + "_API" + "_KEY",
+    "eyJ" + "hbGci",
+    "sk" + "-or" + "-",
+    "postgres" + "://",
 ]
 
 
@@ -58,5 +58,25 @@ def test_frontend_html_mentions_key_demo_sections():
         "Demo Flow",
         "Auth Tests",
         "Evidence Log",
+        "Seed demo data",
+        "Reset demo data",
     ]:
         assert section in html
+
+
+def test_demo_flow_uses_deterministic_tutoring_answer():
+    app_js = (FRONTEND_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert "demoSubmitTutoringAnswer" in app_js
+    assert "/student/submit-tutoring-answer" in app_js
+    assert "Can you guide me through this activity one question at a time?" in app_js
+    assert "Active retrieval practice is better than rereading" in app_js
+    assert "Initialize tutoring flow" in app_js
+    assert "Submit scoring answer" in app_js
+    assert "tutoringScore" in app_js
+
+
+def test_demo_flow_exports_after_manual_grade():
+    app_js = (FRONTEND_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert app_js.index('"Manual grade"') < app_js.index('"Export scores"')
