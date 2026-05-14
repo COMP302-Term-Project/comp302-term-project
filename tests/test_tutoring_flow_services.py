@@ -79,7 +79,13 @@ def test_submit_tutoring_answer_stores_student_answer_and_returns_one_followup_q
         ],
     )
 
-    with patch("app.services.get_db", return_value=fake_db):
+    with patch("app.services.get_db", return_value=fake_db), patch(
+        "app.services._call_tutoring_llm",
+        return_value=(
+            "Can you make your reasoning more specific using the important terms from the activity?",
+            "",
+        ),
+    ):
         response = submitTutoringAnswer(
             "student@test.com",
             "secure123",

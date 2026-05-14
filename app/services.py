@@ -1,11 +1,21 @@
+import csv
+import base64
+import binascii
+import hashlib
+import hmac
+import io
+import json
 import os
 import re
-import json
 import requests
+import time
 from dotenv import load_dotenv
 from supabase import create_client, Client
 
 load_dotenv()
+
+GOOGLE_SESSION_TOKEN_PREFIX = "google_session"
+GOOGLE_SESSION_TTL_SECONDS = 60 * 60 * 8
 
 
 def _is_blank(value: object) -> bool:
@@ -16,6 +26,13 @@ def _normalize_email(email: str | None) -> str:
     if email is None:
         return ""
     return email.strip().lower()
+
+
+def _normalize_role(role: str | None) -> str | None:
+    if role is None:
+        return None
+    normalized_role = str(role).strip().lower()
+    return normalized_role or None
 
 
 def _validate_credentials(email: str | None, password: str | None) -> dict[str, object]:
@@ -30,6 +47,162 @@ def _validate_credentials(email: str | None, password: str | None) -> dict[str, 
     return {"ok": True, "email": normalized_email}
 
 
+def _base64url_encode(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
+
+
+def _base64url_decode(value: str) -> bytes:
+    padding = "=" * (-len(value) % 4)
+    return base64.urlsafe_b64decode(value + padding)
+
+
+def _google_session_secret() -> str:
+    return os.environ.get("GOOGLE_AUTH_SESSION_SECRET") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+
+
+def _issue_google_session_token(email: str, role: str) -> str:
+    secret = _google_session_secret()
+    if _is_blank(secret):
+        raise ValueError("Google auth session secret is missing")
+
+    now = int(time.time())
+    payload = {
+        "email": _normalize_email(email),
+        "role": role,
+        "iat": now,
+        "exp": now + GOOGLE_SESSION_TTL_SECONDS,
+    }
+    payload_json = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    encoded_payload = _base64url_encode(payload_json)
+    signature = hmac.new(secret.encode("utf-8"), encoded_payload.encode("ascii"), hashlib.sha256).digest()
+    return f"{GOOGLE_SESSION_TOKEN_PREFIX}.{encoded_payload}.{_base64url_encode(signature)}"
+
+
+def _verify_google_session_token(token: str | None, email: str, role: str) -> dict[str, object]:
+    if _is_blank(token) or not str(token).startswith(f"{GOOGLE_SESSION_TOKEN_PREFIX}."):
+        return {"ok": False, "error": "Invalid credentials"}
+
+    secret = _google_session_secret()
+    if _is_blank(secret):
+        return {"ok": False, "error": "Invalid credentials"}
+
+    parts = str(token).split(".")
+    if len(parts) != 3:
+        return {"ok": False, "error": "Invalid credentials"}
+
+    _, encoded_payload, encoded_signature = parts
+    expected_signature = hmac.new(secret.encode("utf-8"), encoded_payload.encode("ascii"), hashlib.sha256).digest()
+    if not hmac.compare_digest(_base64url_encode(expected_signature), encoded_signature):
+        return {"ok": False, "error": "Invalid credentials"}
+
+    try:
+        payload = json.loads(_base64url_decode(encoded_payload).decode("utf-8"))
+        expires_at = int(payload.get("exp", 0))
+    except (binascii.Error, TypeError, ValueError, json.JSONDecodeError):
+        return {"ok": False, "error": "Invalid credentials"}
+
+    if payload.get("role") != role:
+        return {"ok": False, "error": "Invalid credentials"}
+
+    if _normalize_email(payload.get("email")) != _normalize_email(email):
+        return {"ok": False, "error": "Invalid credentials"}
+
+    if expires_at < int(time.time()):
+        return {"ok": False, "error": "Invalid credentials"}
+
+    return {"ok": True, "email": payload["email"], "role": payload["role"]}
+
+
+def _verify_google_id_token(id_token: str) -> dict[str, object]:
+    if _is_blank(id_token):
+        return {"ok": False, "error": "Google ID token is required"}
+
+    google_client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
+    if _is_blank(google_client_id):
+        return {"ok": False, "error": "GOOGLE_CLIENT_ID is not configured"}
+
+    try:
+        from google.auth.transport import requests as google_requests
+        from google.oauth2 import id_token as google_id_token
+    except ImportError:
+        return {"ok": False, "error": "google-auth dependency is not installed"}
+
+    try:
+        token_info = google_id_token.verify_oauth2_token(
+            str(id_token),
+            google_requests.Request(),
+            google_client_id,
+        )
+    except ValueError:
+        return {"ok": False, "error": "Invalid Google ID token"}
+
+    email = _normalize_email(token_info.get("email"))
+    if _is_blank(email):
+        return {"ok": False, "error": "Google ID token is missing email"}
+
+    if token_info.get("email_verified") is False:
+        return {"ok": False, "error": "Google email is not verified"}
+
+    return {"ok": True, "email": email, "token_info": token_info}
+
+
+def _public_user(row: dict[str, object]) -> dict[str, object]:
+    return {
+        "id": row.get("id"),
+        "email": row.get("email"),
+        "full_name": row.get("full_name"),
+    }
+
+
+def _lookup_role_user(db, role: str, email: str) -> dict[str, object] | None:
+    table_name = "students" if role == "student" else "instructors"
+    resp = db.table(table_name).select("id,email,full_name").eq("email", email).execute()
+    if not resp.data:
+        return None
+    return _public_user(resp.data[0])
+
+
+def _authenticate_google_user_by_email(db, email: str, role: str | None = None) -> dict[str, object]:
+    normalized_email = _normalize_email(email)
+    normalized_role = _normalize_role(role)
+    if _is_blank(normalized_email):
+        return {"ok": False, "error": "Google ID token is missing email"}
+
+    if normalized_role is not None and normalized_role not in {"student", "instructor"}:
+        return {"ok": False, "error": "role must be student or instructor"}
+
+    roles_to_check = [normalized_role] if normalized_role else ["student", "instructor"]
+    matches = []
+    for candidate_role in roles_to_check:
+        user = _lookup_role_user(db, str(candidate_role), normalized_email)
+        if user:
+            matches.append({"role": candidate_role, "user": user})
+
+    if normalized_role and not matches:
+        article = "an" if normalized_role == "instructor" else "a"
+        return {"ok": False, "error": f"Google identity is not mapped to {article} {normalized_role} account"}
+
+    if not matches:
+        return {"ok": False, "error": "Google identity is not mapped to a user account"}
+
+    if role is None and len(matches) > 1:
+        return {"ok": False, "error": "Google identity maps to multiple roles; role is required"}
+
+    match = matches[0]
+    try:
+        session_token = _issue_google_session_token(normalized_email, str(match["role"]))
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+
+    return {
+        "ok": True,
+        "role": match["role"],
+        "email": normalized_email,
+        "user": match["user"],
+        "session_token": session_token,
+    }
+
+
 def _authenticate_instructor(db, email, password):
     credentials = _validate_credentials(email, password)
     if not credentials["ok"]:
@@ -38,7 +211,11 @@ def _authenticate_instructor(db, email, password):
     normalized_email = str(credentials["email"])
     auth_resp = db.table("instructors").select("id,email,full_name,password").eq("email", normalized_email).execute()
 
-    if not auth_resp.data or auth_resp.data[0].get("password") != password:
+    if not auth_resp.data:
+        return {"ok": False, "error": "Invalid credentials"}
+
+    session_check = _verify_google_session_token(password, normalized_email, "instructor")
+    if auth_resp.data[0].get("password") != password and not session_check["ok"]:
         return {"ok": False, "error": "Invalid credentials"}
 
     instructor = auth_resp.data[0]
@@ -60,7 +237,11 @@ def _authenticate_student(db, email, password):
     normalized_email = str(credentials["email"])
     auth_resp = db.table("students").select("id,email,full_name,password").eq("email", normalized_email).execute()
 
-    if not auth_resp.data or auth_resp.data[0].get("password") != password:
+    if not auth_resp.data:
+        return {"ok": False, "error": "Invalid credentials"}
+
+    session_check = _verify_google_session_token(password, normalized_email, "student")
+    if auth_resp.data[0].get("password") != password and not session_check["ok"]:
         return {"ok": False, "error": "Invalid credentials"}
 
     student = auth_resp.data[0]
@@ -147,6 +328,84 @@ def get_db() -> Client:
     if not supabase_url or not supabase_service_role_key:
         raise ValueError("Supabase environment variables are missing")
     return create_client(supabase_url, supabase_service_role_key)
+
+
+# ==========================================
+# DEMO SETUP APIs
+# ==========================================
+#
+# These wrappers call the SQL functions
+#   public.seed_demo_data()    — resources/database_sql/functions/seed_demo_data_function.sql
+#   public.delete_demo_data()  — resources/database_sql/functions/delete_demo_data_function.sql
+# via Supabase RPC. Both functions are idempotent and scoped to demo
+# identifiers (demo emails + demo course codes), so non-demo data is never
+# touched.
+
+DEMO_PASSWORD = "pass123"
+DEMO_INSTRUCTOR_A_EMAIL = "instructor1@mef.edu.tr"
+DEMO_INSTRUCTOR_B_EMAIL = "instructor2@mef.edu.tr"
+DEMO_STUDENT_1_EMAIL = "comp302.term.project@gmail.com"
+DEMO_STUDENT_2_EMAIL = "student2@mef.edu.tr"
+DEMO_COURSE_1_CODE = "SE101"
+DEMO_COURSE_2_CODE = "SE102"
+
+
+def resetDemoData() -> dict:
+    db = get_db()
+    db.rpc("delete_demo_data", {}).execute()
+    return {"ok": True, "message": "Demo data reset"}
+
+
+def _select_one(db, table_name: str, filters: dict[str, object], columns: str) -> dict[str, object]:
+    query = db.table(table_name).select(columns)
+    for column, value in filters.items():
+        query = query.eq(column, value)
+    response = query.execute()
+    if not response.data:
+        raise ValueError(f"Demo seed row missing from {table_name}: {filters}")
+    return response.data[0]
+
+
+def seedDemoData() -> dict:
+    db = get_db()
+    db.rpc("seed_demo_data", {}).execute()
+
+    instructor_a = _select_one(db, "instructors", {"email": DEMO_INSTRUCTOR_A_EMAIL}, "id,email")
+    instructor_b = _select_one(db, "instructors", {"email": DEMO_INSTRUCTOR_B_EMAIL}, "id,email")
+    student_1    = _select_one(db, "students",    {"email": DEMO_STUDENT_1_EMAIL},    "id,email")
+    student_2    = _select_one(db, "students",    {"email": DEMO_STUDENT_2_EMAIL},    "id,email")
+    course_1     = _select_one(db, "courses",     {"course_id": DEMO_COURSE_1_CODE},  "id,course_id")
+    course_2     = _select_one(db, "courses",     {"course_id": DEMO_COURSE_2_CODE},  "id,course_id")
+    activity_1   = _select_one(db, "activities",  {"course_id": course_1["id"], "activity_no": 1}, "activity_no,status")
+    activity_2   = _select_one(db, "activities",  {"course_id": course_1["id"], "activity_no": 2}, "activity_no,status")
+
+    return {
+        "ok": True,
+        "message": "Demo data seeded",
+        "demo": {
+            "instructorA": {"id": instructor_a["id"], "email": instructor_a["email"], "password": DEMO_PASSWORD},
+            "instructorB": {"id": instructor_b["id"], "email": instructor_b["email"], "password": DEMO_PASSWORD},
+            "student1":    {"id": student_1["id"],    "email": student_1["email"],    "password": DEMO_PASSWORD},
+            "student2":    {"id": student_2["id"],    "email": student_2["email"],    "password": DEMO_PASSWORD},
+            "course1":     {"id": course_1["id"],     "course_id": course_1["course_id"]},
+            "course2":     {"id": course_2["id"],     "course_id": course_2["course_id"]},
+            "activity1":   {"activity_no": activity_1["activity_no"], "status": activity_1["status"]},
+            "activity2":   {"activity_no": activity_2["activity_no"], "status": activity_2["status"]},
+        },
+    }
+
+
+# ==========================================
+# FEDERATED AUTH APIs
+# ==========================================
+
+def googleLogin(id_token: str | None = None, role: str | None = None) -> dict:
+    token_check = _verify_google_id_token(id_token or "")
+    if not token_check["ok"]:
+        return token_check
+
+    db = get_db()
+    return _authenticate_google_user_by_email(db, str(token_check["email"]), role)
 
 
 # ==========================================
@@ -301,9 +560,79 @@ def _save_conversation_history(db, student_id: int, course_id: int, activity_no:
     ).execute()
 
 
-def _get_student_score(db, student_id: int, course_id: int, activity_no: int) -> float:
-    scores_resp = db.table("score_logs").select("score").eq("student_id", student_id).eq("course_id", course_id).eq("activity_no", activity_no).execute()
-    return sum(record.get("score", 0.0) for record in scores_resp.data) if scores_resp.data else 0.0
+def _get_student_score_logs(db, student_id: int, course_id: int, activity_no: int) -> list[dict]:
+    scores_resp = (
+        db.table("score_logs")
+        .select("score,meta")
+        .eq("student_id", student_id)
+        .eq("course_id", course_id)
+        .eq("activity_no", activity_no)
+        .execute()
+    )
+    return scores_resp.data or []
+
+
+def _normalize_score_meta(value: object) -> str:
+    if _is_blank(value):
+        return ""
+    return " ".join(str(value).strip().lower().split())
+
+
+def _learning_objectives(activity: dict) -> list[str]:
+    objectives = activity.get("learning_objectives") or []
+    if not isinstance(objectives, list):
+        return []
+    return [str(objective).strip() for objective in objectives if not _is_blank(objective)]
+
+
+def _matching_learning_objective(activity: dict, meta: object) -> str | None:
+    normalized_meta = _normalize_score_meta(meta)
+    if not normalized_meta:
+        return None
+
+    for objective in _learning_objectives(activity):
+        if _normalize_score_meta(objective) == normalized_meta:
+            return objective
+
+    return None
+
+
+def _achieved_learning_objectives(activity: dict, score_logs: list[dict]) -> list[str]:
+    objectives_by_meta = {
+        _normalize_score_meta(objective): objective
+        for objective in _learning_objectives(activity)
+    }
+    achieved = []
+    seen = set()
+
+    for score_log in score_logs:
+        normalized_meta = _normalize_score_meta(score_log.get("meta"))
+        if normalized_meta in objectives_by_meta and normalized_meta not in seen:
+            achieved.append(objectives_by_meta[normalized_meta])
+            seen.add(normalized_meta)
+
+    return achieved
+
+
+def _find_existing_score_log(db, student_id: int, course_id: int, activity_no: int, meta: str) -> dict | None:
+    normalized_meta = _normalize_score_meta(meta)
+    if not normalized_meta:
+        return None
+
+    scores_resp = (
+        db.table("score_logs")
+        .select("*")
+        .eq("student_id", student_id)
+        .eq("course_id", course_id)
+        .eq("activity_no", activity_no)
+        .execute()
+    )
+
+    for score_log in scores_resp.data or []:
+        if _normalize_score_meta(score_log.get("meta")) == normalized_meta:
+            return score_log
+
+    return None
 
 
 def _last_assistant_response(history: list[dict[str, str]]) -> str | None:
@@ -335,9 +664,82 @@ def _build_followup_tutoring_response(history: list[dict[str, str]]) -> str:
     return followups[turn_index % len(followups)]
 
 
-def _build_tutoring_llm_messages(activity: dict, history: list[dict[str, str]], current_score: float = 0.0) -> list[dict[str, str]]:
-    learning_objectives = activity.get("learning_objectives") or []
+def _build_completion_tutoring_response(score: float) -> str:
+    return f"Nice work, you have completed this activity. Your total score is {score:g}."
+
+
+def _strip_trailing_question(response_text: str) -> str:
+    lines = response_text.rstrip().splitlines()
+    while lines and not lines[-1].strip():
+        lines.pop()
+
+    if lines and lines[-1].strip().endswith("?"):
+        lines.pop()
+
+    return "\n".join(lines).rstrip()
+
+
+_SCORE_KEYWORD_PATTERN = re.compile(r"(?i)\b(?:scores?|totals?|points?)\b")
+_SENTENCE_PATTERN = re.compile(r"[^.!?\n]+[.!?]+|[^.!?\n]+")
+_DIGIT_RUN_PATTERN = re.compile(r"\d+")
+
+
+def _strip_score_mismatch_sentences(text: str, score: float) -> str:
+    expected = f"{score:g}"
+
+    def keep_sentence(sentence: str) -> bool:
+        if not _SCORE_KEYWORD_PATTERN.search(sentence):
+            return True
+        numbers = _DIGIT_RUN_PATTERN.findall(sentence)
+        if not numbers:
+            return True
+        return any(number == expected for number in numbers)
+
+    rebuilt_lines = []
+    for line in text.splitlines():
+        sentences = _SENTENCE_PATTERN.findall(line)
+        if not sentences:
+            rebuilt_lines.append(line)
+            continue
+        rebuilt_lines.append("".join(s for s in sentences if keep_sentence(s)))
+    cleaned = "\n".join(rebuilt_lines)
+    cleaned = re.sub(r"[ \t]+", " ", cleaned)
+    return cleaned.strip()
+
+
+def _finalize_completion_response(response_text: str, score: float) -> str:
+    completion_text = _build_completion_tutoring_response(score)
+    cleaned_response = _strip_score_mismatch_sentences(response_text, score)
+    cleaned_response = _strip_trailing_question(cleaned_response)
+
+    if completion_text.lower() in cleaned_response.lower():
+        return cleaned_response
+
+    if cleaned_response:
+        return f"{cleaned_response}\n\n{completion_text}"
+
+    return completion_text
+
+
+def _build_tutoring_llm_messages(
+    activity: dict,
+    history: list[dict[str, str]],
+    current_score: float = 0.0,
+    achieved_objectives: list[str] | None = None,
+) -> list[dict[str, str]]:
+    learning_objectives = _learning_objectives(activity)
+    achieved_objectives = achieved_objectives or []
+    achieved_text = "\n".join(f"- {objective}" for objective in achieved_objectives) or "- None"
+    remaining_objectives = [
+        objective
+        for objective in learning_objectives
+        if _normalize_score_meta(objective) not in {
+            _normalize_score_meta(achieved_objective)
+            for achieved_objective in achieved_objectives
+        }
+    ]
     objectives_text = "\n".join(f"- {objective}" for objective in learning_objectives)
+    remaining_text = "\n".join(f"- {objective}" for objective in remaining_objectives) or "- None"
     system_prompt = (
         "ROLE: Warm university instructor. Teach for conceptual mastery using Socratic questions and academic explanations.\n\n"
         "STRICT OUTPUT STYLE:\n"
@@ -356,12 +758,18 @@ def _build_tutoring_llm_messages(activity: dict, history: list[dict[str, str]], 
         "HARD RULES:\n"
         "- Never explain or directly teach anything before a score is earned.\n"
         "- Never use the words 'LO' or 'Learning Objective'.\n"
+        "- Only score objectives from REMAINING OBJECTIVES. The APICall meta must exactly equal one remaining objective text.\n"
+        "- If REMAINING OBJECTIVES is None, set APICall to empty, say the activity is complete, and do not ask another question.\n"
+        "- Never announce a score above the number of LEARNING OBJECTIVES.\n"
         "- Always respond in English.\n"
         "- If you give some options to the student, give them with numbered list instead of bullets.\n"
         "- All the topic related terms and words will be presented as activity. NEVER use topic word for any reason. EXAMPLE: start an activity -> start a topic OR activity_no -> topic_no OR activity text -> topic_text.\n\n"
         f"ACTIVITY TEXT:\n{activity.get('activity_text', '')}\n\n"
         f"LEARNING OBJECTIVES:\n{objectives_text}\n\n"
-        f"CURRENT SCORE: {current_score}"
+        f"ACHIEVED OBJECTIVES:\n{achieved_text}\n\n"
+        f"REMAINING OBJECTIVES:\n{remaining_text}\n\n"
+        f"CURRENT SCORE: {current_score}\n"
+        f"MAX SCORE: {len(learning_objectives)}"
     )
 
     return [{"role": "system", "content": system_prompt}, *history]
@@ -378,8 +786,13 @@ def _extract_log_score_meta(apicall: str) -> str | None:
         return match.group(1).strip()
     return None
 
-def _call_tutoring_llm(activity: dict, history: list[dict[str, str]], current_score: float = 0.0) -> tuple[str, str]:
-    messages = _build_tutoring_llm_messages(activity, history, current_score)
+def _call_tutoring_llm(
+    activity: dict,
+    history: list[dict[str, str]],
+    current_score: float = 0.0,
+    achieved_objectives: list[str] | None = None,
+) -> tuple[str, str]:
+    messages = _build_tutoring_llm_messages(activity, history, current_score, achieved_objectives)
 
     api_key = os.environ.get("OPENROUTER_API_KEY")
     model = os.environ.get("OPENROUTER_MODEL")
@@ -433,7 +846,27 @@ def submitTutoringAnswer(
     course = active_check["course"]
     activity = active_check["activity"]
     history = _load_conversation_history(db, student["id"], course["id"], activity_no)
-    current_score = _get_student_score(db, student["id"], course["id"], activity_no)
+    score_logs = _get_student_score_logs(db, student["id"], course["id"], activity_no)
+    achieved_objectives = _achieved_learning_objectives(activity, score_logs)
+    max_score = len(_learning_objectives(activity))
+    current_score = float(len(achieved_objectives))
+
+    if max_score and current_score >= max_score:
+        response_text = _build_completion_tutoring_response(current_score)
+        if not _is_blank(answer):
+            history.append({"role": "user", "content": str(answer).strip()})
+            history.append({"role": "assistant", "content": response_text})
+            _save_conversation_history(db, student["id"], course["id"], activity_no, history)
+
+        return {
+            "ok": True,
+            "response": response_text,
+            "state": {
+                "student_turns": _student_turn_count(history),
+                "assistant_turns": sum(1 for message in history if message["role"] == "assistant"),
+                "score": current_score,
+            },
+        }
 
     if not history:
         response_text = _build_initial_tutoring_response(activity["activity_text"])
@@ -461,14 +894,23 @@ def submitTutoringAnswer(
         }
 
     history.append({"role": "user", "content": str(answer).strip()})
-    response_text, apicall = _call_tutoring_llm(activity, list(history), current_score)
+    response_text, apicall = _call_tutoring_llm(activity, list(history), current_score, achieved_objectives)
     
     meta = _extract_log_score_meta(apicall)
     if meta:
-        existing_score = db.table("score_logs").select("id").eq("student_id", student["id"]).eq("course_id", course["id"]).eq("activity_no", activity_no).eq("meta", meta).execute()
-        if not existing_score.data:
-            logScore(email, password, course["course_id"], activity_no, 1.0, meta)
-            current_score += 1.0
+        objective_meta = _matching_learning_objective(activity, meta)
+        if objective_meta:
+            existing_score = _find_existing_score_log(db, student["id"], course["id"], activity_no, objective_meta)
+        else:
+            existing_score = None
+
+        if objective_meta and not existing_score and current_score < max_score:
+            score_result = logScore(email, password, course["course_id"], activity_no, 1.0, objective_meta)
+            if score_result.get("ok") and not score_result.get("duplicate"):
+                current_score += 1.0
+
+    if max_score and current_score >= max_score:
+        response_text = _finalize_completion_response(response_text, current_score)
             
     history.append({"role": "assistant", "content": response_text})
     _save_conversation_history(db, student["id"], course["id"], activity_no, history)
@@ -492,16 +934,37 @@ def logScore(email: str, password: str, course_id: str, activity_no: int, score:
 
     student = active_check["student"]
     course = active_check["course"]
+    activity = active_check["activity"]
 
     if score <= 0:
         return {"ok": False, "error": "Score must be positive"}
+
+    if score != 1.0:
+        return {"ok": False, "error": "Objective score must be exactly 1"}
+
+    if _is_blank(meta):
+        return {"ok": False, "error": "meta is required"}
+
+    meta_text = str(meta).strip()
+    objective_meta = _matching_learning_objective(activity, meta_text)
+    if not objective_meta:
+        return {"ok": False, "error": "meta must match an activity learning objective"}
+
+    score_logs = _get_student_score_logs(db, student["id"], course["id"], activity_no)
+    achieved_objectives = _achieved_learning_objectives(activity, score_logs)
+    existing_score = _find_existing_score_log(db, student["id"], course["id"], activity_no, objective_meta)
+    if existing_score:
+        return {"ok": True, "score_log": existing_score, "duplicate": True}
+
+    if len(achieved_objectives) >= len(_learning_objectives(activity)):
+        return {"ok": False, "error": "All activity objectives are already scored"}
 
     insert_data = {
         "student_id": student["id"],
         "course_id": course["id"],
         "activity_no": activity_no,
         "score": score,
-        "meta": meta or ""
+        "meta": objective_meta
     }
 
     insert_res = db.table("score_logs").insert(insert_data).execute()
@@ -742,7 +1205,68 @@ def _cleanup_activity_runtime_state(db, course_db_id: int, activity_no: int) -> 
 
 # --- Export API (produces csv document) ---
 def exportScores(email: str, password: str, course_id: str, activity_no: int) -> dict:
-    raise NotImplementedError
+    db = get_db()
+    identity = _authenticate_instructor(db, email, password)
+    if not identity["ok"]:
+        return identity
+
+    auth_check = _authorize_instructor_course_access(db, identity, course_id)
+    if not auth_check["ok"]:
+        return auth_check
+
+    course = auth_check["course"]
+    activity_resp = (
+        db.table("activities")
+        .select("id")
+        .eq("course_id", course["id"])
+        .eq("activity_no", activity_no)
+        .execute()
+    )
+    if not activity_resp.data:
+        return {"ok": False, "error": "Activity does not exist"}
+
+    score_resp = (
+        db.table("score_logs")
+        .select("*")
+        .eq("course_id", course["id"])
+        .eq("activity_no", activity_no)
+        .order("student_id")
+        .execute()
+    )
+    student_resp = db.table("students").select("id,email,full_name").execute()
+    students_by_id = {
+        student.get("id"): student
+        for student in (student_resp.data or [])
+    }
+
+    fieldnames = [
+        "student_id",
+        "student_email",
+        "student_full_name",
+        "course_id",
+        "activity_no",
+        "score",
+        "meta",
+        "created_at",
+    ]
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=fieldnames, lineterminator="\n")
+    writer.writeheader()
+
+    for score_log in score_resp.data or []:
+        student = students_by_id.get(score_log.get("student_id"), {})
+        writer.writerow({
+            "student_id": score_log.get("student_id", ""),
+            "student_email": student.get("email", ""),
+            "student_full_name": student.get("full_name", ""),
+            "course_id": course.get("course_id", course_id),
+            "activity_no": score_log.get("activity_no", activity_no),
+            "score": score_log.get("score", ""),
+            "meta": score_log.get("meta", ""),
+            "created_at": score_log.get("created_at", ""),
+        })
+
+    return {"ok": True, "csv": output.getvalue()}
 
 
 # --- Reset API (deletes all scores for given activity_no) ---
@@ -764,7 +1288,47 @@ def resetActivity(email: str, password: str, course_id: str, activity_no: int) -
 
 # --- Student Password Reset API ---
 def resetStudentPassword(email: str, password: str, course_id: str, student_email: str, new_password: str) -> dict:
-    raise NotImplementedError
+    if _is_blank(student_email):
+        return {"ok": False, "error": "student_email is required"}
+
+    if _is_blank(new_password):
+        return {"ok": False, "error": "new_password is required"}
+
+    db = get_db()
+    identity = _authenticate_instructor(db, email, password)
+    if not identity["ok"]:
+        return identity
+
+    auth_check = _authorize_instructor_course_access(db, identity, course_id)
+    if not auth_check["ok"]:
+        return auth_check
+
+    normalized_student_email = _normalize_email(student_email)
+    student_resp = (
+        db.table("students")
+        .select("id,email")
+        .eq("email", normalized_student_email)
+        .execute()
+    )
+    if not student_resp.data:
+        return {"ok": False, "error": "Student not found"}
+
+    course = auth_check["course"]
+    student = student_resp.data[0]
+    enrollment_resp = (
+        db.table("student_courses")
+        .select("id")
+        .eq("student_id", student["id"])
+        .eq("course_id", course["id"])
+        .execute()
+    )
+    if not enrollment_resp.data:
+        return {"ok": False, "error": "Student is not enrolled in this course"}
+
+    db.table("students").update({"password": new_password}).eq("id", student["id"]).execute()
+    return {"ok": True, "message": "Student password reset"}
+
+
 # --- Manual Grading API ---
 def manualGradeStudent(
     email: str,
@@ -809,6 +1373,20 @@ def manualGradeStudent(
     # only ACTIVE activities can be graded
     if activity.get("status") != "ACTIVE":
         return {"ok": False, "error": "Activity is not active"}
+
+    student_resp = db.table("students").select("id").eq("id", student_id).execute()
+    if not student_resp.data:
+        return {"ok": False, "error": "Student not found"}
+
+    enrollment_resp = (
+        db.table("student_courses")
+        .select("id")
+        .eq("student_id", student_id)
+        .eq("course_id", course["id"])
+        .execute()
+    )
+    if not enrollment_resp.data:
+        return {"ok": False, "error": "Student is not enrolled in this course"}
 
     # call database function
     db.rpc(

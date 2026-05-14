@@ -1,0 +1,512 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>InClass Platform</title>
+  <link rel="stylesheet" href="/ui-static/styles.css">
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+  <div class="app-shell">
+
+    <!-- LEFT SIDEBAR -->
+    <aside class="sidebar">
+      <div class="brand-block">
+        <div class="brand-mark">IC</div>
+        <div>
+          <h1>InClass</h1>
+          <p class="brand-sub">AI Tutoring Platform</p>
+        </div>
+      </div>
+
+      <nav class="nav-list" aria-label="Platform views">
+        <div class="nav-group">
+          <span class="nav-group-label">Instructor</span>
+          <button class="nav-item" data-view-target="instructorView">Dashboard</button>
+        </div>
+        <div class="nav-group">
+          <span class="nav-group-label">Student</span>
+          <button class="nav-item" data-view-target="studentView">AI Tutor</button>
+        </div>
+        <div class="nav-group">
+          <span class="nav-group-label">Tools</span>
+          <button class="nav-item active" data-view-target="setupView">Setup</button>
+          <button class="nav-item" data-view-target="demoFlowView">Demo Flow</button>
+          <button class="nav-item" data-view-target="negativeTestsView">Auth Tests</button>
+          <button class="nav-item" data-view-target="rawEvidenceView">Evidence Log</button>
+        </div>
+      </nav>
+
+      <div class="sidebar-footer">
+        <span id="globalStatus" class="badge badge-neutral">Ready</span>
+      </div>
+    </aside>
+
+    <!-- MAIN CONTENT AREA -->
+    <main class="main-area">
+
+      <!-- ==================== SETUP VIEW ==================== -->
+      <section id="setupView" class="view active-view">
+        <div class="page-header">
+          <div>
+            <p class="eyebrow">Configuration</p>
+            <h2>Demo Setup</h2>
+            <p class="muted">Fill in credentials and identifiers before running the demo.</p>
+          </div>
+          <button data-action="health">Check API health</button>
+        </div>
+
+        <div class="card-grid two">
+          <section class="card">
+            <h3>Connection</h3>
+            <div class="field">
+              <label for="baseUrl">Backend base URL</label>
+              <input id="baseUrl" data-save placeholder="http://127.0.0.1:8000">
+            </div>
+            <div id="readyCard" class="alert alert-warning">
+              <strong>Required fields missing</strong>
+              <span>Fill instructor, student, course, activity, and student ID fields before the guided demo.</span>
+            </div>
+            <div class="button-row">
+              <button id="saveDemoFields">Save fields</button>
+              <button id="clearDemoFields" class="secondary">Clear saved fields</button>
+            </div>
+            <div class="button-row">
+              <button data-action="seedDemoData">Seed demo data</button>
+              <button data-action="resetDemoData" class="danger">Reset demo data</button>
+            </div>
+            <label class="check">
+              <input id="rememberPasswords" type="checkbox">
+              Remember passwords locally (demo only)
+            </label>
+          </section>
+
+          <section class="card">
+            <h3>Credentials</h3>
+            <div class="grid-two">
+              <div class="field">
+                <label for="instructorEmail">Instructor email</label>
+                <input id="instructorEmail" data-save type="email" autocomplete="username">
+              </div>
+              <div class="field">
+                <label for="instructorPassword">Instructor password</label>
+                <input id="instructorPassword" type="password" autocomplete="current-password">
+              </div>
+              <div class="field">
+                <label for="studentEmail">Student email</label>
+                <input id="studentEmail" data-save type="email" autocomplete="username">
+              </div>
+              <div class="field">
+                <label for="studentPassword">Student password</label>
+                <input id="studentPassword" type="password" autocomplete="current-password">
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <section class="card">
+          <h3>Activity context</h3>
+          <div class="grid-four">
+            <div class="field">
+              <label for="courseId">Course ID</label>
+              <input id="courseId" data-save placeholder="CS101">
+            </div>
+            <div class="field">
+              <label for="activityNo">Activity no</label>
+              <input id="activityNo" data-save type="number" min="1" value="1">
+            </div>
+            <div class="field">
+              <label for="studentId">Student ID</label>
+              <input id="studentId" data-save type="number" min="1">
+            </div>
+            <div class="field">
+              <label for="resetStudentEmail">Student email for reset</label>
+              <input id="resetStudentEmail" data-save type="email">
+            </div>
+          </div>
+        </section>
+
+        <pre id="setupOut" class="output"></pre>
+      </section>
+
+      <!-- ==================== INSTRUCTOR VIEW ==================== -->
+      <section id="instructorView" class="view">
+        <div class="page-header">
+          <div>
+            <p class="eyebrow">Instructor Console</p>
+            <h2>Instructor Dashboard</h2>
+          </div>
+          <span class="badge badge-info">Course orchestration</span>
+        </div>
+
+        <div class="inner-tabs">
+          <button class="inner-tab active" data-tab-target="instrActivities">Activities</button>
+          <button class="inner-tab" data-tab-target="instrGrading">Grading</button>
+          <button class="inner-tab" data-tab-target="instrAccount">Account</button>
+        </div>
+
+        <!-- Tab: Activities -->
+        <div id="instrActivities" class="inner-panel active-panel">
+          <section class="card">
+            <div class="split-head">
+              <h3>Course &amp; Activities</h3>
+              <div class="actions compact">
+                <button data-action="listMyCourses">My courses</button>
+                <button data-action="listActivities">List activities</button>
+                <button data-action="startActivity">Start</button>
+                <button data-action="endActivity">End</button>
+                <button data-action="resetActivity" class="danger">Reset</button>
+              </div>
+            </div>
+            <div id="coursesDisplay" class="data-zone empty">Courses will appear here. Click a row to select a course.</div>
+            <div id="activitiesDisplay" class="data-zone empty" style="margin-top:12px">Activities will appear here. Click a row to select an activity.</div>
+          </section>
+
+          <div class="card-grid two">
+            <section class="card">
+              <h4>Create activity</h4>
+              <div class="field">
+                <label for="activityText">Activity text</label>
+                <textarea id="activityText" rows="4">Explain the main idea in your own words.</textarea>
+              </div>
+              <div class="field">
+                <label for="learningObjectives">Learning objectives (one per line)</label>
+                <textarea id="learningObjectives" rows="3">Identify the concept
+Apply it to a short example</textarea>
+              </div>
+              <div class="field narrow">
+                <label for="optionalActivityNo">Optional activity no</label>
+                <input id="optionalActivityNo" type="number" min="1">
+              </div>
+              <button data-action="createActivity">Create activity</button>
+            </section>
+
+            <section class="card">
+              <h4>Update activity</h4>
+              <div class="field">
+                <label for="updateActivityText">New activity text (optional)</label>
+                <textarea id="updateActivityText" rows="4"></textarea>
+              </div>
+              <div class="field">
+                <label for="updateLearningObjectives">New learning objectives (optional, one per line)</label>
+                <textarea id="updateLearningObjectives" rows="3"></textarea>
+              </div>
+              <button data-action="updateActivity">Update activity</button>
+            </section>
+          </div>
+        </div>
+
+        <!-- Tab: Grading -->
+        <div id="instrGrading" class="inner-panel">
+          <div class="card-grid two">
+            <section class="card">
+              <h3>Manual grade</h3>
+              <div class="grid-two">
+                <div class="field">
+                  <label for="manualScore">Score</label>
+                  <input id="manualScore" type="number" step="0.01" value="1">
+                </div>
+                <div class="field">
+                  <label for="manualReason">Reason</label>
+                  <input id="manualReason" value="Demo manual grade">
+                </div>
+              </div>
+              <button data-action="manualGrade">Apply manual grade</button>
+              <p class="quiet">Uses Student ID, Course ID, and Activity no from Setup.</p>
+            </section>
+
+            <section class="card">
+              <h3>Export scores</h3>
+              <p class="quiet">Exports a CSV score log for the selected course and activity.</p>
+              <div class="button-row">
+                <button data-action="exportScores">Export scores</button>
+                <button id="downloadCsv" class="secondary hidden">Download CSV</button>
+              </div>
+            </section>
+          </div>
+
+          <section class="card">
+            <h3>Score log</h3>
+            <div id="scoresDisplay" class="data-zone empty">Exported score rows will appear here.</div>
+          </section>
+        </div>
+
+        <!-- Tab: Account -->
+        <div id="instrAccount" class="inner-panel">
+          <div class="card-grid two">
+            <section class="card">
+              <h3>Authentication</h3>
+              <div class="actions">
+                <button data-action="instructorLogin">Login with email</button>
+                <button data-action="setInstructorPassword" class="secondary">Set password</button>
+              </div>
+
+              <div class="or-divider"><span>or</span></div>
+
+              <div class="google-button-host" data-google-host-role="instructor"></div>
+              <p id="googleStatusInstructor" class="google-status hidden"></p>
+              <p class="google-origin-hint">Origin sent to Google: <code id="googleOriginInstructor">—</code>. Add this <strong>exact string</strong> to Authorized JavaScript Origins.</p>
+
+              <div class="form-section-label">Change password</div>
+              <div class="grid-two">
+                <div class="field">
+                  <label for="instructorOldPassword">Current password</label>
+                  <input id="instructorOldPassword" type="password">
+                </div>
+                <div class="field">
+                  <label for="instructorNewPassword">New password</label>
+                  <input id="instructorNewPassword" type="password">
+                </div>
+              </div>
+              <button data-action="changeInstructorPassword" class="secondary">Change password</button>
+            </section>
+
+            <section class="card">
+              <h3>Student support</h3>
+              <p class="quiet">Reset the password for an enrolled student in the current course.</p>
+              <div class="field">
+                <label for="resetNewPassword">New password for student</label>
+                <input id="resetNewPassword" type="password">
+              </div>
+              <button data-action="resetStudentPassword">Reset student password</button>
+              <p class="quiet" style="margin-top:8px">Uses Reset student email and Course ID from Setup.</p>
+            </section>
+          </div>
+        </div>
+
+        <pre id="instructorOut" class="output" style="margin-top:18px"></pre>
+
+        <!-- Hidden output element kept for legacy JS routing compat -->
+        <pre id="userManagementOut" class="hidden"></pre>
+      </section>
+
+      <!-- ==================== STUDENT VIEW ==================== -->
+      <section id="studentView" class="view chat-view">
+
+        <!-- Student sidebar -->
+        <div class="student-sidebar">
+          <section class="card identity-card">
+            <div class="identity-line">
+              <div class="identity-avatar" id="studentIdentityAvatar">S</div>
+              <div class="identity-body">
+                <div class="identity-name" id="studentIdentityName">Not signed in</div>
+                <div class="identity-sub" id="studentIdentitySub">Sign in to load your activity.</div>
+              </div>
+            </div>
+          </section>
+
+          <details class="card collapsible" id="studentAuthCard">
+            <summary>
+              <h3>Sign in</h3>
+              <span class="hint">email or Google</span>
+            </summary>
+            <div class="collapsible-body">
+              <div class="actions">
+                <button data-action="studentLogin">Login with email</button>
+                <button data-action="setStudentPassword" class="secondary">Set password</button>
+              </div>
+
+              <div class="or-divider"><span>or</span></div>
+
+              <div class="google-button-host" data-google-host-role="student"></div>
+              <p id="googleStatusStudent" class="google-status hidden"></p>
+              <p class="google-origin-hint">Origin sent to Google: <code id="googleOriginStudent">—</code>. Add this <strong>exact string</strong> to Authorized JavaScript Origins.</p>
+
+              <div class="form-section-label">Change password</div>
+              <div class="grid-two">
+                <div class="field">
+                  <label for="studentOldPassword">Current password</label>
+                  <input id="studentOldPassword" type="password">
+                </div>
+                <div class="field">
+                  <label for="studentNewPassword">New password</label>
+                  <input id="studentNewPassword" type="password">
+                </div>
+              </div>
+              <button data-action="changeStudentPassword" class="secondary full-w">Change password</button>
+            </div>
+          </details>
+
+          <section class="card">
+            <div class="split-head">
+              <h3>Current activity</h3>
+              <button data-action="getActivity" class="secondary compact-btn">Load</button>
+            </div>
+            <div id="objectiveWarning" class="integrity-pill warning">Hidden instructional fields are not exposed.</div>
+            <div id="activityDisplay" class="activity-display">No active activity loaded yet.</div>
+          </section>
+
+          <details class="card collapsible" id="studentDemoCard">
+            <summary>
+              <h3>Score evidence</h3>
+              <span class="hint">demo helper</span>
+            </summary>
+            <div class="collapsible-body">
+              <div id="studentStateDisplay" class="score-display">No score yet</div>
+              <div class="form-section-label">Manual score test</div>
+              <div class="grid-two">
+                <div class="field">
+                  <label for="studentScore">Score</label>
+                  <input id="studentScore" type="number" step="0.01" value="1">
+                </div>
+                <div class="field">
+                  <label for="scoreMeta">Meta</label>
+                  <input id="scoreMeta" value="demo">
+                </div>
+              </div>
+              <button data-action="logScore" class="secondary full-w">Log score</button>
+            </div>
+          </details>
+        </div>
+
+        <!-- Chat main area -->
+        <div class="student-chat-main">
+          <div class="chat-header">
+            <div class="chat-header-left">
+              <span class="chat-tutor-mark">IC</span>
+              <div>
+                <div class="chat-title">AI Tutor</div>
+                <div id="chatCourseBadge" class="chat-course-sub">No activity loaded</div>
+              </div>
+            </div>
+            <div id="chatScorePill" class="badge badge-info" style="display:none"></div>
+          </div>
+
+          <div id="chatPanel" class="chat-panel">
+            <div class="tutor-welcome" id="tutorWelcome">
+              <div class="tutor-avatar">IC</div>
+              <h2>Hi, I am your AI Tutor.</h2>
+              <p>I'm here to help you work through this activity. Once your instructor starts an activity, load it from the panel on the left and I'll guide you.</p>
+              <div class="welcome-hints">
+                <div class="hint-chip">Submit an answer for guided feedback</div>
+                <div class="hint-chip">Ask follow-up questions</div>
+                <div class="hint-chip">Your conversation is private to you</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="chat-input-area">
+            <textarea id="studentAnswer" rows="3" placeholder="Type your answer or ask the tutor a question… (Enter to send, Shift+Enter for new line)"></textarea>
+            <div class="chat-actions">
+              <span class="composer-hint">Enter to send · Shift+Enter for new line</span>
+              <button data-action="startTutoring" class="secondary">Ask tutor</button>
+              <button data-action="submitAnswer">Submit answer</button>
+            </div>
+          </div>
+
+          <pre id="studentOut" class="output hidden"></pre>
+        </div>
+      </section>
+
+      <!-- ==================== DEMO FLOW VIEW ==================== -->
+      <section id="demoFlowView" class="view">
+        <div class="page-header">
+          <div>
+            <p class="eyebrow">Guided black-box run</p>
+            <h2>Demo Flow</h2>
+            <p class="muted">Execute each step in order to demonstrate the full platform flow.</p>
+          </div>
+          <span class="badge badge-info">One step at a time</span>
+        </div>
+        <ol id="demoFlow" class="flow-list"></ol>
+      </section>
+
+      <!-- ==================== NEGATIVE TESTS VIEW ==================== -->
+      <section id="negativeTestsView" class="view">
+        <div class="page-header">
+          <div>
+            <p class="eyebrow">Authorization evidence</p>
+            <h2>Auth Tests</h2>
+            <p class="muted">Verify that unauthorized users are correctly rejected by the backend.</p>
+          </div>
+          <span class="badge badge-warning">Expected rejections</span>
+        </div>
+        <section class="card">
+          <h3>Unauthorized credentials</h3>
+          <div class="grid-two">
+            <div class="field">
+              <label for="badInstructorEmail">Unauthorized instructor email</label>
+              <input id="badInstructorEmail" data-save type="email">
+            </div>
+            <div class="field">
+              <label for="badInstructorPassword">Unauthorized instructor password</label>
+              <input id="badInstructorPassword" type="password">
+            </div>
+            <div class="field">
+              <label for="badStudentEmail">Unauthorized student email</label>
+              <input id="badStudentEmail" data-save type="email">
+            </div>
+            <div class="field">
+              <label for="badStudentPassword">Unauthorized student password</label>
+              <input id="badStudentPassword" type="password">
+            </div>
+          </div>
+          <div class="actions">
+            <button data-action="badInstructorListActivities">Unauth instructor: list activities</button>
+            <button data-action="badInstructorResetActivity">Unauth instructor: reset activity</button>
+            <button data-action="badInstructorManualGrade">Unauth instructor: manual grade</button>
+            <button data-action="badStudentGetActivity">Unauth student: get activity</button>
+          </div>
+        </section>
+        <pre id="negativeOut" class="output"></pre>
+      </section>
+
+      <!-- ==================== RAW EVIDENCE VIEW ==================== -->
+      <section id="rawEvidenceView" class="view">
+        <div class="page-header">
+          <div>
+            <p class="eyebrow">Audit trail</p>
+            <h2>Evidence Log</h2>
+          </div>
+          <div class="actions compact">
+            <button id="clearHistory" class="secondary">Clear history</button>
+            <button id="exportHistory" class="secondary">Export as JSON</button>
+          </div>
+        </div>
+        <div class="card-grid two">
+          <section class="card">
+            <h3>Last request (sanitized)</h3>
+            <pre id="rawLastSummary" class="output tall"></pre>
+          </section>
+          <section class="card">
+            <h3>Last response (raw JSON)</h3>
+            <pre id="rawLastResponse" class="output tall"></pre>
+          </section>
+        </div>
+        <section class="card">
+          <h3>Request history</h3>
+          <div id="historyList" class="history-list empty">No requests yet.</div>
+        </section>
+      </section>
+
+    </main>
+
+    <!-- RIGHT: Live evidence panel -->
+    <aside class="evidence-panel" id="evidencePanel">
+      <button type="button" class="evidence-toggle" id="evidenceToggle"
+              aria-label="Collapse evidence panel" title="Collapse evidence panel">›</button>
+      <div class="evidence-content">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Live evidence</p>
+            <h2>Last Response</h2>
+          </div>
+          <span id="lastBadge" class="badge badge-neutral">No response yet</span>
+        </div>
+        <h3>Sanitized request</h3>
+        <pre id="lastSummary" class="output compact-output"></pre>
+        <h3>Raw response</h3>
+        <pre id="lastResponse" class="output evidence-output"></pre>
+      </div>
+      <div class="evidence-rail" aria-hidden="true">
+        <span class="evidence-rail-label">Evidence</span>
+        <span id="lastBadgeRail" class="badge badge-neutral">No response</span>
+      </div>
+    </aside>
+
+  </div>
+
+  <script src="/ui-static/app.js" defer></script>
+</body>
+</html>

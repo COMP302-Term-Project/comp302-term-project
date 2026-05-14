@@ -1,11 +1,74 @@
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
 from fastapi import FastAPI
-  
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
+# Load .env before any route reads os.environ. services.py also calls
+# load_dotenv() defensively, but /auth/google-client-id is reached before
+# services.py is lazily imported by other routes, so it must be loaded here.
+load_dotenv()
+
 app = FastAPI()
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+FRONTEND_DIR = PROJECT_ROOT / "frontend"
+
+app.mount("/ui-static", StaticFiles(directory=FRONTEND_DIR), name="ui-static")
 
 
 @app.get("/")
 def root() -> dict:
     return {"ok": True, "message": "InClass Platform API"}
+
+
+@app.get("/ui")
+def demoUi() -> FileResponse:
+    return FileResponse(FRONTEND_DIR / "index.html")
+
+
+# ==========================================
+# DEMO SETUP ROUTES
+# ==========================================
+
+@app.post("/demo/reset-data")
+def resetDemoData() -> dict:
+    from app import services
+    return services.resetDemoData()
+
+
+@app.post("/demo/seed-data")
+def seedDemoData() -> dict:
+    from app import services
+    return services.seedDemoData()
+
+
+# ==========================================
+# FEDERATED AUTH ROUTES
+# ==========================================
+
+@app.post("/auth/google-login")
+def googleLogin(payload: dict) -> dict:
+    from app import services
+
+    id_token = payload.get("id_token") or payload.get("credential")
+    return services.googleLogin(id_token=id_token, role=payload.get("role"))
+
+
+@app.get("/auth/google-client-id")
+def googleClientId() -> dict:
+    client_id = (os.environ.get("GOOGLE_CLIENT_ID") or "").strip()
+    if not client_id:
+        return {
+            "ok": False,
+            "client_id": "",
+            "error": (
+                "GOOGLE_CLIENT_ID is not configured. Set it in .env "
+                "and restart the server."
+            ),
+        }
+    return {"ok": True, "client_id": client_id}
 
 
 # ==========================================
@@ -220,6 +283,43 @@ def resetActivity(
         course_id=course_id,
         activity_no=activity_no,
     )
+
+
+@app.post("/instructor/export-scores")
+def exportScores(
+    *,
+    email: str,
+    password: str,
+    course_id: str,
+    activity_no: int,
+) -> dict:
+    from app import services
+    return services.exportScores(
+        email=email,
+        password=password,
+        course_id=course_id,
+        activity_no=activity_no,
+    )
+
+
+@app.post("/instructor/reset-student-password")
+def resetStudentPassword(
+    *,
+    email: str,
+    password: str,
+    course_id: str,
+    student_email: str,
+    new_password: str,
+) -> dict:
+    from app import services
+    return services.resetStudentPassword(
+        email=email,
+        password=password,
+        course_id=course_id,
+        student_email=student_email,
+        new_password=new_password,
+    )
+
 
 # S2-T14 [US-L] - Implement and route manualGradeStudent
 @app.post("/instructor/manual-grade")

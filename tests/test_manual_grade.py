@@ -11,8 +11,15 @@ def make_db(activity_rows=None, mappings=None):
             "full_name": "Test Instructor",
             "password": "secure123",
         }],
+        students=[{
+            "id": 42,
+            "email": "student@test.com",
+            "full_name": "Test Student",
+            "password": "studentpass",
+        }],
         courses=[{"id": 101, "course_id": "CS101", "course_name": "Intro CS"}],
         instructor_courses=mappings if mappings is not None else [{"id": 1, "instructor_id": 7, "course_id": 101}],
+        student_courses=[{"id": 1, "student_id": 42, "course_id": 101}],
         activities=activity_rows or [],
     )
 
@@ -139,6 +146,30 @@ def test_manual_grade_missing_reason(client):
     assert response.json() == {"ok": False, "error": "reason is required"}
 
 
+def test_manual_grade_rejects_student_outside_course(client):
+    fake_db = make_db(activity_rows=[{
+        "id": 55, "course_id": 101, "activity_no": 1, "status": "ACTIVE"
+    }])
+    fake_db.tables["student_courses"] = []
+
+    with patch("app.services.get_db", return_value=fake_db):
+        response = client.post(
+            "/instructor/manual-grade",
+            params={
+                "email": "test@test.com",
+                "password": "secure123",
+                "course_id": "CS101",
+                "student_id": 42,
+                "activity_no": 1,
+                "score": 5.0,
+                "reason": "Great answer",
+            },
+        )
+
+    assert response.json() == {"ok": False, "error": "Student is not enrolled in this course"}
+    assert fake_db.rpc_calls == []
+
+
 def test_manual_grade_unauthorized(client):
     fake_db = make_db(mappings=[])
 
@@ -157,4 +188,3 @@ def test_manual_grade_unauthorized(client):
         )
 
     assert response.json() == {"ok": False, "error": "Unauthorized"}
-    
