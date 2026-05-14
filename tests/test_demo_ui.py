@@ -52,11 +52,11 @@ def test_frontend_html_mentions_key_demo_sections():
     html = (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
 
     for section in [
-        "Instructor View",
-        "Student View",
-        "User Management",
+        "Instructor Dashboard",
+        "AI Tutor",
+        "Student support",
         "Demo Flow",
-        "Negative Tests",
-        "Raw Evidence",
+        "Auth Tests",
+        "Evidence Log",
     ]:
         assert section in html

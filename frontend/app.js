@@ -53,25 +53,14 @@
     ["Student tries logScore after reset", "Expected rejection because the activity is no longer active.", "/student/log-score", "logScore", "postResetFailure"],
   ];
 
-  function el(id) {
-    return document.getElementById(id);
-  }
-
-  function value(id) {
-    const node = el(id);
-    return node ? node.value.trim() : "";
-  }
-
+  function el(id) { return document.getElementById(id); }
+  function value(id) { const n = el(id); return n ? n.value.trim() : ""; }
   function setValue(id, next) {
-    const node = el(id);
-    if (node) node.value = next == null ? "" : String(next);
+    const n = el(id);
+    if (n) n.value = next == null ? "" : String(next);
     updateReadyCard();
   }
-
-  function numberValue(id) {
-    const raw = value(id);
-    return raw === "" ? "" : Number(raw);
-  }
+  function numberValue(id) { const r = value(id); return r === "" ? "" : Number(r); }
 
   function baseUrl() {
     const fallback = window.location.origin || "http://127.0.0.1:8000";
@@ -81,7 +70,7 @@
   function objectives(id) {
     return value(id)
       .split(/\r?\n/)
-      .map((line) => line.trim())
+      .map((l) => l.trim())
       .filter(Boolean);
   }
 
@@ -107,27 +96,25 @@
   }
 
   function summary(method, path, params, body) {
-    return maskSensitive({
-      method,
-      path,
-      params: params || {},
-      body: body === undefined ? undefined : body,
-    });
+    return maskSensitive({ method, path, params: params || {}, body });
   }
 
   function visibleOutputForAction(action) {
     if (action === "health") return "setupOut";
-    if (action.includes("UserMgmt")) return "userManagementOut";
     if (action.startsWith("bad")) return "negativeOut";
-    if (["studentLogin", "setStudentPassword", "changeStudentPassword", "getActivity", "startTutoring", "submitAnswer", "logScore"].includes(action)) {
+    if ([
+      "studentLogin", "setStudentPassword", "changeStudentPassword",
+      "getActivity", "startTutoring", "submitAnswer", "logScore",
+      "googleLoginStudent",
+    ].includes(action)) {
       return "studentOut";
     }
     return "instructorOut";
   }
 
   function renderTo(id, data) {
-    const node = el(id);
-    if (node) node.textContent = format(data);
+    const n = el(id);
+    if (n) n.textContent = format(data);
   }
 
   async function apiCall(path, params, options) {
@@ -144,67 +131,51 @@
       fetchOptions.body = JSON.stringify(opts.body);
     }
 
-    const requestSummary = summary(method, path, params, opts.body);
+    const req = summary(method, path, params, opts.body);
     try {
       const response = await fetch(baseUrl() + path + (qs.toString() ? "?" + qs.toString() : ""), fetchOptions);
       const text = await response.text();
       let data;
-      try {
-        data = text ? JSON.parse(text) : {};
-      } catch (err) {
-        data = { ok: false, error: "Non-JSON response", status: response.status, body: text };
-      }
+      try { data = text ? JSON.parse(text) : {}; }
+      catch (_) { data = { ok: false, error: "Non-JSON response", status: response.status, body: text }; }
       if (!response.ok && data && data.detail) {
         data = { ok: false, error: "HTTP " + response.status, detail: data.detail };
       }
-      updateEvidence(requestSummary, data, response.ok);
-      return { data, requestSummary, httpOk: response.ok };
+      updateEvidence(req, data, response.ok);
+      return { data, requestSummary: req, httpOk: response.ok };
     } catch (err) {
       const data = { ok: false, error: "Backend unreachable", detail: String(err.message || err) };
-      updateEvidence(requestSummary, data, false);
-      return { data, requestSummary, httpOk: false };
+      updateEvidence(req, data, false);
+      return { data, requestSummary: req, httpOk: false };
     }
   }
 
-  function updateEvidence(requestSummary, data, httpOk) {
-    const safeResponse = maskSensitive(data);
-    renderTo("lastSummary", requestSummary);
-    renderTo("rawLastSummary", requestSummary);
-    renderTo("lastResponse", safeResponse);
-    renderTo("rawLastResponse", safeResponse);
+  function updateEvidence(req, data, httpOk) {
+    const safe = maskSensitive(data);
+    renderTo("lastSummary", req);
+    renderTo("rawLastSummary", req);
+    renderTo("lastResponse", safe);
+    renderTo("rawLastResponse", safe);
 
-    const ok = safeResponse && safeResponse.ok === true;
+    const ok = safe && safe.ok === true;
     setBadge(el("lastBadge"), ok ? "PASS" : httpOk ? "Backend response" : "Request failed", ok ? "success" : "warning");
     setBadge(el("globalStatus"), ok ? "Last request passed" : "Evidence updated", ok ? "success" : "warning");
 
-    history.unshift({
-      at: new Date().toISOString(),
-      request: requestSummary,
-      response: safeResponse,
-    });
+    history.unshift({ at: new Date().toISOString(), request: req, response: safe });
     if (history.length > 40) history.pop();
     renderHistory();
   }
 
   function instructorParams(extra) {
-    return Object.assign({
-      email: value("instructorEmail"),
-      password: value("instructorPassword"),
-    }, extra || {});
+    return Object.assign({ email: value("instructorEmail"), password: value("instructorPassword") }, extra || {});
   }
 
   function studentParams(extra) {
-    return Object.assign({
-      email: value("studentEmail"),
-      password: value("studentPassword"),
-    }, extra || {});
+    return Object.assign({ email: value("studentEmail"), password: value("studentPassword") }, extra || {});
   }
 
   function courseActivity() {
-    return {
-      course_id: value("courseId"),
-      activity_no: numberValue("activityNo"),
-    };
+    return { course_id: value("courseId"), activity_no: numberValue("activityNo") };
   }
 
   const actions = {
@@ -213,17 +184,26 @@
       updateReadyCard();
       return result;
     },
+
+    // ── Instructor auth ──────────────────────────────────────────
     instructorLogin: () => apiCall("/instructor/login", instructorParams()),
     setInstructorPassword: () => apiCall("/instructor/set-password", instructorParams()),
-    setInstructorPasswordUserMgmt: () => apiCall("/instructor/set-password", instructorParams()),
     changeInstructorPassword: () => apiCall("/instructor/change-password", instructorParams({
       old_password: value("instructorOldPassword"),
       new_password: value("instructorNewPassword"),
     })),
-    changeInstructorPasswordUserMgmt: () => apiCall("/instructor/change-password", instructorParams({
-      old_password: value("umInstructorOldPassword"),
-      new_password: value("umInstructorNewPassword"),
-    })),
+
+    // ── Google federated auth ────────────────────────────────────
+    googleLoginInstructor: () => apiCall("/auth/google-login", {}, {
+      method: "POST",
+      body: { id_token: value("googleIdTokenInstructor"), role: "instructor" },
+    }),
+    googleLoginStudent: () => apiCall("/auth/google-login", {}, {
+      method: "POST",
+      body: { id_token: value("googleIdTokenStudent"), role: "student" },
+    }),
+
+    // ── Instructor course / activity ─────────────────────────────
     listMyCourses: async () => {
       const result = await apiCall("/instructor/list-my-courses", instructorParams());
       renderCourses(result.data);
@@ -254,6 +234,8 @@
     startActivity: () => apiCall("/instructor/start-activity", instructorParams(courseActivity())),
     endActivity: () => apiCall("/instructor/end-activity", instructorParams(courseActivity())),
     resetActivity: () => apiCall("/instructor/reset-activity", instructorParams(courseActivity())),
+
+    // ── Instructor grading ───────────────────────────────────────
     exportScores: async () => {
       const result = await apiCall("/instructor/export-scores", instructorParams(courseActivity()));
       latestCsv = (result.data && result.data.csv) || "";
@@ -261,16 +243,6 @@
       el("downloadCsv").classList.toggle("hidden", !latestCsv);
       return result;
     },
-    resetStudentPassword: () => apiCall("/instructor/reset-student-password", instructorParams({
-      course_id: value("courseId"),
-      student_email: value("resetStudentEmail"),
-      new_password: value("resetNewPassword"),
-    })),
-    resetStudentPasswordUserMgmt: () => apiCall("/instructor/reset-student-password", instructorParams({
-      course_id: value("courseId"),
-      student_email: value("resetStudentEmail"),
-      new_password: value("umResetNewPassword"),
-    })),
     manualGrade: () => apiCall("/instructor/manual-grade", instructorParams({
       course_id: value("courseId"),
       student_id: numberValue("studentId"),
@@ -278,17 +250,21 @@
       score: numberValue("manualScore"),
       reason: value("manualReason"),
     })),
+    resetStudentPassword: () => apiCall("/instructor/reset-student-password", instructorParams({
+      course_id: value("courseId"),
+      student_email: value("resetStudentEmail"),
+      new_password: value("resetNewPassword"),
+    })),
+
+    // ── Student auth ─────────────────────────────────────────────
     studentLogin: () => apiCall("/student/login", studentParams()),
     setStudentPassword: () => apiCall("/student/set-password", studentParams()),
-    setStudentPasswordUserMgmt: () => apiCall("/student/set-password", studentParams()),
     changeStudentPassword: () => apiCall("/student/change-password", studentParams({
       old_password: value("studentOldPassword"),
       new_password: value("studentNewPassword"),
     })),
-    changeStudentPasswordUserMgmt: () => apiCall("/student/change-password", studentParams({
-      old_password: value("umStudentOldPassword"),
-      new_password: value("umStudentNewPassword"),
-    })),
+
+    // ── Student activity / tutoring ──────────────────────────────
     getActivity: async () => {
       const result = await apiCall("/student/get-activity", studentParams(courseActivity()));
       renderActivity(result.data);
@@ -304,18 +280,17 @@
       renderStudentState(result.data);
       return result;
     },
+
+    // ── Negative tests ───────────────────────────────────────────
     badInstructorListActivities: () => expectedFailure("/instructor/list-activities", {
-      email: value("badInstructorEmail"),
-      password: value("badInstructorPassword"),
+      email: value("badInstructorEmail"), password: value("badInstructorPassword"),
       course_id: value("courseId"),
     }),
     badInstructorResetActivity: () => expectedFailure("/instructor/reset-activity", Object.assign({
-      email: value("badInstructorEmail"),
-      password: value("badInstructorPassword"),
+      email: value("badInstructorEmail"), password: value("badInstructorPassword"),
     }, courseActivity())),
     badInstructorManualGrade: () => expectedFailure("/instructor/manual-grade", {
-      email: value("badInstructorEmail"),
-      password: value("badInstructorPassword"),
+      email: value("badInstructorEmail"), password: value("badInstructorPassword"),
       course_id: value("courseId"),
       student_id: numberValue("studentId"),
       activity_no: numberValue("activityNo"),
@@ -323,8 +298,7 @@
       reason: value("manualReason"),
     }),
     badStudentGetActivity: () => expectedFailure("/student/get-activity", Object.assign({
-      email: value("badStudentEmail"),
-      password: value("badStudentPassword"),
+      email: value("badStudentEmail"), password: value("badStudentPassword"),
     }, courseActivity())),
   };
 
@@ -338,7 +312,7 @@
   async function tutoring(answer) {
     const params = studentParams(courseActivity());
     if (answer) params.answer = answer;
-    addChat("student", answer || "Start / continue tutoring");
+    addChat("student", answer || "Ask tutor / start tutoring");
     const result = await apiCall("/student/submit-tutoring-answer", params);
     const response = result.data || {};
     const guidance = response.assistant_response || response.guidance || response.message || response.response || response.feedback;
@@ -348,6 +322,11 @@
   }
 
   function addChat(kind, text) {
+    // Hide the welcome state once real messages appear.
+    const welcome = el("tutorWelcome");
+    if (welcome && !welcome.classList.contains("hidden")) {
+      welcome.classList.add("hidden");
+    }
     const node = document.createElement("div");
     node.className = "message " + kind;
     node.textContent = text;
@@ -359,6 +338,15 @@
     const activity = data && (data.activity || data);
     const text = activity && (activity.activity_text || activity.text || activity.content);
     el("activityDisplay").textContent = text || "No student-facing activity text found in response.";
+
+    // Update the chat header badge with course + activity info.
+    const courseBadge = el("chatCourseBadge");
+    if (courseBadge) {
+      const course = value("courseId") || "Course";
+      const actNo = value("activityNo") || "?";
+      courseBadge.textContent = course + " — Activity " + actNo;
+    }
+
     const leaked = !!(activity && activity.learning_objectives);
     const warning = el("objectiveWarning");
     warning.className = leaked ? "integrity-pill error" : "integrity-pill success";
@@ -372,7 +360,19 @@
     ["score", "state", "status", "current_state"].forEach((key) => {
       if (data && data[key] !== undefined) bits.push(key + ": " + data[key]);
     });
-    el("studentStateDisplay").textContent = bits.length ? bits.join(" | ") : "No score/state returned";
+    const text = bits.length ? bits.join(" | ") : "No score/state returned";
+    el("studentStateDisplay").textContent = text;
+
+    // Mirror score in the chat header pill.
+    const pill = el("chatScorePill");
+    if (pill) {
+      if (bits.length) {
+        pill.style.display = "";
+        pill.textContent = text;
+      } else {
+        pill.style.display = "none";
+      }
+    }
   }
 
   function rowsFrom(data, keys) {
@@ -386,6 +386,7 @@
 
   function renderTable(targetId, rows, columns, emptyText, onRowClick) {
     const target = el(targetId);
+    if (!target) return;
     if (!rows.length) {
       target.className = "data-zone empty";
       target.textContent = emptyText;
@@ -395,7 +396,7 @@
     const table = document.createElement("table");
     table.className = "data-table";
     const head = document.createElement("thead");
-    head.innerHTML = "<tr>" + columns.map((col) => "<th>" + col.label + "</th>").join("") + "</tr>";
+    head.innerHTML = "<tr>" + columns.map((c) => "<th>" + c.label + "</th>").join("") + "</tr>";
     table.appendChild(head);
     const body = document.createElement("tbody");
     rows.forEach((row) => {
@@ -440,12 +441,8 @@
   }
 
   function renderScores(data) {
-    if (!latestCsv) {
-      renderTable("scoresDisplay", [], [], "No CSV returned.");
-      return;
-    }
-    const rows = csvRows(latestCsv);
-    renderTable("scoresDisplay", rows, [
+    if (!latestCsv) { renderTable("scoresDisplay", [], [], "No CSV returned."); return; }
+    renderTable("scoresDisplay", csvRows(latestCsv), [
       { key: "student_id", label: "Student ID" },
       { key: "student_email", label: "Email" },
       { key: "activity_no", label: "Activity" },
@@ -461,9 +458,7 @@
     return lines.slice(1).map((line) => {
       const values = line.split(",");
       const row = {};
-      headers.forEach((header, index) => {
-        row[header] = values[index] || "";
-      });
+      headers.forEach((h, i) => { row[h] = values[i] || ""; });
       return row;
     });
   }
@@ -484,16 +479,17 @@
     return data && data.ok === true ? ["PASS", "success"] : ["FAIL", "error"];
   }
 
+  // ── Demo flow ─────────────────────────────────────────────────
   function initFlow() {
     const list = el("demoFlow");
-    flowSteps.forEach((step, index) => {
-      const [title, explanation, endpoint, action, expected] = step;
+    flowSteps.forEach(([title, explanation, endpoint, action, expected], index) => {
       const item = document.createElement("li");
       item.className = "flow-card";
       item.innerHTML =
         '<div class="flow-title">' +
         '<div class="flow-number">' + (index + 1) + '</div>' +
-        '<div><strong>' + title + '</strong><p class="quiet">' + explanation + '</p><div class="endpoint">' + endpoint + '</div></div>' +
+        '<div><strong>' + title + '</strong><p class="quiet">' + explanation + '</p>' +
+        '<div class="endpoint">' + endpoint + '</div></div>' +
         '<span class="badge badge-neutral" id="flowBadge' + index + '">Not run</span>' +
         '</div>' +
         '<button data-flow="' + index + '">Run step</button>' +
@@ -510,44 +506,84 @@
     });
   }
 
+  // ── Inner tabs (Activities / Grading / Account within instructor) ──
+  function initInnerTabs() {
+    document.querySelectorAll("[data-tab-target]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const panelId = button.dataset.tabTarget;
+        const panel = el(panelId);
+        if (!panel) return;
+
+        // Deactivate sibling tabs.
+        const tabBar = button.closest(".inner-tabs");
+        if (tabBar) tabBar.querySelectorAll(".inner-tab").forEach((t) => t.classList.remove("active"));
+        button.classList.add("active");
+
+        // Deactivate sibling panels within the same section.
+        const section = button.closest(".view");
+        if (section) section.querySelectorAll(".inner-panel").forEach((p) => p.classList.remove("active-panel"));
+        panel.classList.add("active-panel");
+      });
+    });
+  }
+
+  // ── Toggle buttons (data-toggle shows/hides target element) ──
+  function initToggleButtons() {
+    document.querySelectorAll("[data-toggle]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const target = el(button.dataset.toggle);
+        if (target) target.classList.toggle("hidden");
+      });
+    });
+  }
+
+  // ── Main navigation ────────────────────────────────────────────
+  function initNavigation() {
+    document.querySelectorAll("[data-view-target]").forEach((button) => {
+      button.addEventListener("click", () => {
+        document.querySelectorAll("[data-view-target]").forEach((n) => n.classList.remove("active"));
+        document.querySelectorAll(".view").forEach((v) => v.classList.remove("active-view"));
+        button.classList.add("active");
+        const view = el(button.dataset.viewTarget);
+        if (view) view.classList.add("active-view");
+      });
+    });
+  }
+
   async function runAction(name) {
     const result = await actions[name]();
     renderTo(visibleOutputForAction(name), result.data);
     return result;
   }
 
-  function renderHistory() {
-    const target = el("historyList");
-    if (!target) return;
-    if (!history.length) {
-      target.className = "history-list empty";
-      target.textContent = "No requests yet.";
-      return;
-    }
-    target.className = "history-list";
-    target.replaceChildren(...history.map((item) => {
-      const div = document.createElement("div");
-      div.className = "history-item";
-      div.innerHTML = "<strong>" + item.request.method + " " + item.request.path + "</strong>" +
-        "<span class=\"quiet\">" + item.at + "</span>" +
-        "<pre class=\"output\">" + escapeHtml(format({ request: item.request, response: item.response })) + "</pre>";
-      return div;
-    }));
+  // ── Button wiring ──────────────────────────────────────────────
+  function initButtons() {
+    document.querySelectorAll("[data-action]").forEach((button) => {
+      button.addEventListener("click", () => runAction(button.dataset.action));
+    });
+
+    el("saveDemoFields").addEventListener("click", saveFields);
+    el("clearDemoFields").addEventListener("click", clearFields);
+    el("clearHistory").addEventListener("click", () => {
+      history.length = 0;
+      renderHistory();
+    });
+    el("exportHistory").addEventListener("click", () =>
+      downloadText("request-history.json", JSON.stringify(history, null, 2), "application/json")
+    );
+    el("downloadCsv").addEventListener("click", () =>
+      downloadText("scores.csv", latestCsv, "text/csv")
+    );
+
+    setupFields.forEach((id) => {
+      const n = el(id);
+      if (n) n.addEventListener("input", updateReadyCard);
+    });
   }
 
-  function escapeHtml(text) {
-    return String(text).replace(/[&<>"']/g, (char) => ({
-      "&": "&amp;",
-      "<": "&lt;",
-      ">": "&gt;",
-      '"': "&quot;",
-      "'": "&#039;",
-    }[char]));
-  }
-
+  // ── Field persistence ──────────────────────────────────────────
   function saveFields() {
-    const safe = {};
-    const passwords = {};
+    const safe = {}, passwords = {};
     setupFields.forEach((id) => {
       if (passwordKeys.has(id)) passwords[id] = value(id);
       else safe[id] = value(id);
@@ -555,7 +591,7 @@
     localStorage.setItem(safeStorageKey, JSON.stringify(safe));
     if (el("rememberPasswords").checked) localStorage.setItem(passwordStorageKey, JSON.stringify(passwords));
     else localStorage.removeItem(passwordStorageKey);
-    setBadge(el("globalStatus"), "Demo fields saved", "success");
+    setBadge(el("globalStatus"), "Fields saved", "success");
     updateReadyCard();
   }
 
@@ -584,41 +620,37 @@
     const card = el("readyCard");
     if (!card) return;
     if (missing.length === 0) {
-      card.className = "ready-card success";
-      card.innerHTML = "<strong>Ready for demo</strong><span>Required credentials and activity identifiers are filled.</span>";
+      card.className = "alert alert-success";
+      card.innerHTML = "<strong>Ready for demo</strong><span>All required credentials and activity identifiers are filled.</span>";
     } else {
-      card.className = "ready-card warning";
+      card.className = "alert alert-warning";
       card.innerHTML = "<strong>Required fields missing</strong><span>Missing: " + missing.join(", ") + "</span>";
     }
   }
 
-  function initNavigation() {
-    document.querySelectorAll("[data-view-target]").forEach((button) => {
-      button.addEventListener("click", () => {
-        document.querySelectorAll("[data-view-target]").forEach((nav) => nav.classList.remove("active"));
-        document.querySelectorAll(".view").forEach((view) => view.classList.remove("active-view"));
-        button.classList.add("active");
-        el(button.dataset.viewTarget).classList.add("active-view");
-      });
-    });
+  // ── History ────────────────────────────────────────────────────
+  function renderHistory() {
+    const target = el("historyList");
+    if (!target) return;
+    if (!history.length) {
+      target.className = "history-list empty";
+      target.textContent = "No requests yet.";
+      return;
+    }
+    target.className = "history-list";
+    target.replaceChildren(...history.map((item) => {
+      const div = document.createElement("div");
+      div.className = "history-item";
+      div.innerHTML =
+        "<strong>" + item.request.method + " " + item.request.path + "</strong>" +
+        "<span class=\"quiet\">" + item.at + "</span>" +
+        "<pre class=\"output\">" + escapeHtml(format({ request: item.request, response: item.response })) + "</pre>";
+      return div;
+    }));
   }
 
-  function initButtons() {
-    document.querySelectorAll("[data-action]").forEach((button) => {
-      button.addEventListener("click", () => runAction(button.dataset.action));
-    });
-    el("saveDemoFields").addEventListener("click", saveFields);
-    el("clearDemoFields").addEventListener("click", clearFields);
-    el("clearHistory").addEventListener("click", () => {
-      history.length = 0;
-      renderHistory();
-    });
-    el("exportHistory").addEventListener("click", () => downloadText("request-history.json", JSON.stringify(history, null, 2), "application/json"));
-    el("downloadCsv").addEventListener("click", () => downloadText("scores.csv", latestCsv, "text/csv"));
-    setupFields.forEach((id) => {
-      const node = el(id);
-      if (node) node.addEventListener("input", updateReadyCard);
-    });
+  function escapeHtml(text) {
+    return String(text).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]));
   }
 
   function downloadText(filename, text, type) {
@@ -634,6 +666,8 @@
   document.addEventListener("DOMContentLoaded", () => {
     loadFields();
     initNavigation();
+    initInnerTabs();
+    initToggleButtons();
     initButtons();
     initFlow();
     renderHistory();
