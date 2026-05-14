@@ -8,6 +8,7 @@ class FakeQueryBuilder:
         self.db = db
         self.table_name = table_name
         self.filters = {}
+        self.range_filters = []
         self.insert_data = None
         self.update_data = None
         self.delete_requested = False
@@ -20,6 +21,10 @@ class FakeQueryBuilder:
 
     def eq(self, column, value):
         self.filters[column] = value
+        return self
+
+    def gte(self, column, value):
+        self.range_filters.append((column, ">=", value))
         return self
 
     def order(self, column, desc=False):
@@ -60,15 +65,20 @@ class FakeQueryBuilder:
                         row.update(self.insert_data)
                         self.db.updates.append({"table": self.table_name, "filters": {c: self.insert_data.get(c) for c in conflict_cols}, "data": dict(self.insert_data)})
                         return FakeResponse([row])
-            rows.append(self.insert_data)
-            self.db.inserts.append({"table": self.table_name, "data": dict(self.insert_data)})
-            return FakeResponse([self.insert_data])
+            inserted = dict(self.insert_data)
+            if self.db.auto_ids and "id" not in inserted:
+                inserted["id"] = self.db.next_id(self.table_name)
+            rows.append(inserted)
+            self.db.inserts.append({"table": self.table_name, "data": dict(inserted)})
+            return FakeResponse([inserted])
 
-        matched_rows = [
-            row
-            for row in rows
-            if all(row.get(column) == value for column, value in self.filters.items())
-        ]
+        matched_rows = []
+        for row in rows:
+            if not all(row.get(column) == value for column, value in self.filters.items()):
+                continue
+            if not all(self._matches_range(row, column, op, value) for column, op, value in self.range_filters):
+                continue
+            matched_rows.append(row)
 
         if self.order_column is not None:
             matched_rows = sorted(
@@ -84,12 +94,13 @@ class FakeQueryBuilder:
             self.db.tables[self.table_name] = [
                 row
                 for row in rows
-                if not all(row.get(column) == value for column, value in self.filters.items())
+                if row not in matched_rows
             ]
             self.db.deletes.append(
                 {
                     "table": self.table_name,
                     "filters": dict(self.filters),
+                    "range_filters": list(self.range_filters),
                 }
             )
             return FakeResponse(matched_rows)
@@ -107,6 +118,14 @@ class FakeQueryBuilder:
 
         return FakeResponse(matched_rows)
 
+    def _matches_range(self, row, column, op, value):
+        current = row.get(column)
+        if current is None:
+            return False
+        if op == ">=":
+            return current >= value
+        return False
+
 
 class FakeRpcBuilder:
     def __init__(self, db, fn_name, params):
@@ -120,7 +139,7 @@ class FakeRpcBuilder:
 
 
 class FakeDB:
-    def __init__(self, **tables):
+    def __init__(self, auto_ids=False, **tables):
         self.tables = {
             "instructors": [],
             "students": [],
@@ -136,6 +155,16 @@ class FakeDB:
         self.updates = []
         self.deletes = []
         self.rpc_calls = []
+        self.auto_ids = auto_ids
+        self._next_ids = {
+            name: max([row.get("id", 0) for row in rows] or [0]) + 1
+            for name, rows in self.tables.items()
+        }
+
+    def next_id(self, table_name):
+        next_value = self._next_ids.get(table_name, 1)
+        self._next_ids[table_name] = next_value + 1
+        return next_value
 
     def table(self, name):
         return FakeQueryBuilder(self, name)

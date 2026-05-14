@@ -1,6 +1,8 @@
 from unittest.mock import patch
 
-from app.main import submitTutoringAnswer
+from fastapi.testclient import TestClient
+
+from app.main import app, submitTutoringAnswer
 from app.services import _build_tutoring_llm_messages
 from tests.fake_supabase import FakeDB
 
@@ -159,6 +161,104 @@ def test_student_tutoring_route_detects_objective_and_logs_score_idempotently():
         assert response2["ok"] is True
         assert len(fake_db.tables["score_logs"]) == 1
         assert response2["state"]["score"] == 1.0
+        assert "no new point" in response2["response"]
+
+
+def test_repeating_same_objective_returns_json_without_new_point():
+    initial_history = [
+        {"role": "assistant", "content": "Initial"}
+    ]
+    fake_db = _authorized_student_db(initial_history)
+    objective = "Active retrieval practice improves long-term learning more than passive rereading."
+    apicall = f'studentApi(action:"logScore") with parameters: score=1 and meta="{objective}"'
+
+    with patch("app.services.get_db", return_value=fake_db), patch(
+        "app.services._call_tutoring_llm",
+        return_value=("Great! You earned 1 point.", apicall),
+    ):
+        first = TestClient(app).post(
+            "/student/submit-tutoring-answer",
+            params={
+                "email": "student@test.com",
+                "password": "secure123",
+                "course_id": "CS101",
+                "activity_no": 1,
+                "answer": "Active retrieval is better than rereading because recall strengthens memory.",
+            },
+        )
+        second = TestClient(app).post(
+            "/student/submit-tutoring-answer",
+            params={
+                "email": "student@test.com",
+                "password": "secure123",
+                "course_id": "CS101",
+                "activity_no": 1,
+                "answer": "Active retrieval is better than rereading because the student recalls the idea from memory.",
+            },
+        )
+
+    assert first.status_code == 200
+    assert first.headers["content-type"].startswith("application/json")
+    assert first.json()["ok"] is True
+    assert first.json()["state"]["score"] == 1.0
+
+    assert second.status_code == 200
+    assert second.headers["content-type"].startswith("application/json")
+    assert second.json()["ok"] is True
+    assert second.json()["state"]["score"] == 1.0
+    assert "no new point" in second.json()["response"]
+    assert len(fake_db.tables["score_logs"]) == 1
+
+
+def test_second_distinct_objective_can_earn_next_point_after_duplicate():
+    initial_history = [
+        {"role": "assistant", "content": "Initial"}
+    ]
+    fake_db = _authorized_student_db(initial_history)
+    first_objective = "Active retrieval practice improves long-term learning more than passive rereading."
+    second_objective = "Feedback after retrieval helps identify and correct misunderstandings."
+
+    with patch("app.services.get_db", return_value=fake_db), patch(
+        "app.services._call_tutoring_llm",
+        side_effect=[
+            ("Great! You earned 1 point.", f'studentApi(action:"logScore") with parameters: score=1 and meta="{first_objective}"'),
+            ("You already covered this idea.", f'studentApi(action:"logScore") with parameters: score=1 and meta="{first_objective}"'),
+            ("Great! You earned another point.", f'studentApi(action:"logScore") with parameters: score=1 and meta="{second_objective}"'),
+        ],
+    ):
+        first = submitTutoringAnswer(
+            email="student@test.com",
+            password="secure123",
+            course_id="CS101",
+            activity_no=1,
+            answer="retrieval",
+        )
+        duplicate = submitTutoringAnswer(
+            email="student@test.com",
+            password="secure123",
+            course_id="CS101",
+            activity_no=1,
+            answer="retrieval again",
+        )
+        second = submitTutoringAnswer(
+            email="student@test.com",
+            password="secure123",
+            course_id="CS101",
+            activity_no=1,
+            answer="feedback",
+        )
+
+    assert first["ok"] is True
+    assert first["state"]["score"] == 1.0
+    assert duplicate["ok"] is True
+    assert duplicate["state"]["score"] == 1.0
+    assert second["ok"] is True
+    assert second["state"]["score"] == 2.0
+    assert len(fake_db.tables["score_logs"]) == 2
+    assert [row["meta"] for row in fake_db.tables["score_logs"]] == [
+        first_objective,
+        second_objective,
+    ]
 
 
 def test_student_tutoring_route_handles_activity_completion_behavior():

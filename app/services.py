@@ -9,6 +9,7 @@ import os
 import re
 import requests
 import time
+from difflib import SequenceMatcher
 from dotenv import load_dotenv
 from supabase import create_client, Client
 
@@ -331,6 +332,196 @@ def get_db() -> Client:
 
 
 # ==========================================
+# DEMO SETUP APIs
+# ==========================================
+
+DEMO_PASSWORD = "pass123"
+DEMO_IDS = {
+    "instructor_a": 302001,
+    "instructor_b": 302002,
+    "student_1": 302101,
+    "student_2": 302102,
+    "course_1": 302201,
+    "course_2": 302202,
+    "instructor_course_1": 302301,
+    "instructor_course_2": 302302,
+    "student_course_1": 302401,
+    "student_course_2": 302402,
+    "activity_1": 302501,
+    "activity_2": 302502,
+}
+DEMO_ACTIVITY_1_TEXT = (
+    "A student studies for an exam by rereading the textbook many times. Another "
+    "student studies by closing the book and trying to explain the ideas from "
+    "memory, then checking mistakes. Which strategy is likely to support better "
+    "long-term learning, and why?"
+)
+DEMO_ACTIVITY_1_OBJECTIVES = [
+    "Explain that active retrieval practice improves long-term learning more than passive rereading.",
+    "Explain that feedback after retrieval helps identify and correct misunderstandings.",
+]
+DEMO_ACTIVITY_2_TEXT = (
+    "A team is building a course registration feature. What user stories and "
+    "acceptance criteria would help the team validate the feature before release?"
+)
+DEMO_ACTIVITY_2_OBJECTIVES = [
+    "Write user stories from the perspective of the users who need the feature.",
+    "Define testable acceptance criteria that describe observable behavior.",
+]
+
+
+def _delete_all_rows(db, table_name: str) -> None:
+    db.table(table_name).delete().gte("id", 0).execute()
+
+
+def _insert_one(db, table_name: str, row: dict[str, object]) -> dict[str, object]:
+    response = db.table(table_name).insert(row).execute()
+    if not response.data:
+        raise ValueError(f"Failed to insert demo row into {table_name}")
+    return response.data[0]
+
+
+def resetDemoData() -> dict:
+    db = get_db()
+    _reset_demo_data_with_db(db)
+    return {"ok": True, "message": "Demo data reset"}
+
+
+def _reset_demo_data_with_db(db) -> None:
+    for table_name in [
+        "conversation_state",
+        "score_logs",
+        "activities",
+        "student_courses",
+        "instructor_courses",
+        "students",
+        "instructors",
+        "courses",
+    ]:
+        _delete_all_rows(db, table_name)
+
+
+def seedDemoData() -> dict:
+    db = get_db()
+    _reset_demo_data_with_db(db)
+
+    instructor_one = _insert_one(db, "instructors", {
+        "id": DEMO_IDS["instructor_a"],
+        "email": "instructor1@mef.edu.tr",
+        "full_name": "Instructor One",
+        "password": DEMO_PASSWORD,
+    })
+    instructor_two = _insert_one(db, "instructors", {
+        "id": DEMO_IDS["instructor_b"],
+        "email": "instructor2@mef.edu.tr",
+        "full_name": "Instructor Two",
+        "password": DEMO_PASSWORD,
+    })
+    student_one = _insert_one(db, "students", {
+        "id": DEMO_IDS["student_1"],
+        "email": "comp302.term.project@gmail.com",
+        "full_name": "Student One",
+        "password": DEMO_PASSWORD,
+    })
+    student_two = _insert_one(db, "students", {
+        "id": DEMO_IDS["student_2"],
+        "email": "student2@mef.edu.tr",
+        "full_name": "Student Two",
+        "password": DEMO_PASSWORD,
+    })
+    course_one = _insert_one(db, "courses", {
+        "id": DEMO_IDS["course_1"],
+        "course_id": "SE101",
+        "course_name": "Software Engineering 101",
+    })
+    course_two = _insert_one(db, "courses", {
+        "id": DEMO_IDS["course_2"],
+        "course_id": "SE102",
+        "course_name": "Software Engineering 102",
+    })
+
+    _insert_one(db, "instructor_courses", {
+        "id": DEMO_IDS["instructor_course_1"],
+        "instructor_id": instructor_one["id"],
+        "course_id": course_one["id"],
+    })
+    _insert_one(db, "instructor_courses", {
+        "id": DEMO_IDS["instructor_course_2"],
+        "instructor_id": instructor_two["id"],
+        "course_id": course_two["id"],
+    })
+    _insert_one(db, "student_courses", {
+        "id": DEMO_IDS["student_course_1"],
+        "student_id": student_one["id"],
+        "course_id": course_one["id"],
+    })
+    _insert_one(db, "student_courses", {
+        "id": DEMO_IDS["student_course_2"],
+        "student_id": student_two["id"],
+        "course_id": course_two["id"],
+    })
+    activity_one = _insert_one(db, "activities", {
+        "id": DEMO_IDS["activity_1"],
+        "course_id": course_one["id"],
+        "activity_no": 1,
+        "activity_text": DEMO_ACTIVITY_1_TEXT,
+        "learning_objectives": list(DEMO_ACTIVITY_1_OBJECTIVES),
+        "status": "NOT_STARTED",
+    })
+    activity_two = _insert_one(db, "activities", {
+        "id": DEMO_IDS["activity_2"],
+        "course_id": course_one["id"],
+        "activity_no": 2,
+        "activity_text": DEMO_ACTIVITY_2_TEXT,
+        "learning_objectives": list(DEMO_ACTIVITY_2_OBJECTIVES),
+        "status": "NOT_STARTED",
+    })
+
+    return {
+        "ok": True,
+        "message": "Demo data seeded",
+        "demo": {
+            "instructorA": {
+                "id": instructor_one["id"],
+                "email": instructor_one["email"],
+                "password": DEMO_PASSWORD,
+            },
+            "instructorB": {
+                "id": instructor_two["id"],
+                "email": instructor_two["email"],
+                "password": DEMO_PASSWORD,
+            },
+            "student1": {
+                "id": student_one["id"],
+                "email": student_one["email"],
+                "password": DEMO_PASSWORD,
+            },
+            "student2": {
+                "id": student_two["id"],
+                "email": student_two["email"],
+                "password": DEMO_PASSWORD,
+            },
+            "course1": {
+                "id": course_one["id"],
+                "course_id": course_one["course_id"],
+            },
+            "course2": {
+                "id": course_two["id"],
+                "course_id": course_two["course_id"],
+            },
+            "activity1": {
+                "activity_no": activity_one["activity_no"],
+                "status": activity_one["status"],
+            },
+            "activity2": {
+                "activity_no": activity_two["activity_no"],
+                "status": activity_two["status"],
+            },
+        },
+    }
+
+
+# ==========================================
 # FEDERATED AUTH APIs
 # ==========================================
 
@@ -506,6 +697,31 @@ def _normalize_score_meta(value: object) -> str:
     return " ".join(str(value).strip().lower().split())
 
 
+def _canonical_score_meta(activity: dict, meta: str | None) -> str | None:
+    normalized_meta = _normalize_score_meta(meta)
+    if not normalized_meta:
+        return None
+
+    best_objective = None
+    best_ratio = 0.0
+    for objective in activity.get("learning_objectives") or []:
+        objective_text = str(objective).strip()
+        normalized_objective = _normalize_score_meta(objective_text)
+        if not normalized_objective:
+            continue
+        if normalized_meta == normalized_objective:
+            return objective_text
+        if normalized_meta in normalized_objective or normalized_objective in normalized_meta:
+            return objective_text
+
+        ratio = SequenceMatcher(None, normalized_meta, normalized_objective).ratio()
+        if ratio > best_ratio:
+            best_objective = objective_text
+            best_ratio = ratio
+
+    return best_objective if best_ratio >= 0.72 else str(meta).strip()
+
+
 def _find_existing_score_log(db, student_id: int, course_id: int, activity_no: int, meta: str) -> dict | None:
     normalized_meta = _normalize_score_meta(meta)
     if not normalized_meta:
@@ -554,6 +770,11 @@ def _build_followup_tutoring_response(history: list[dict[str, str]]) -> str:
     ]
     turn_index = max(_student_turn_count(history) - 1, 0)
     return followups[turn_index % len(followups)]
+
+
+def _duplicate_objective_response(meta: str, history: list[dict[str, str]]) -> str:
+    followup = _build_followup_tutoring_response(history)
+    return f"You already covered this idea, so no new point was added. {followup}"
 
 
 def _build_tutoring_llm_messages(activity: dict, history: list[dict[str, str]], current_score: float = 0.0) -> list[dict[str, str]]:
@@ -684,13 +905,24 @@ def submitTutoringAnswer(
     history.append({"role": "user", "content": str(answer).strip()})
     response_text, apicall = _call_tutoring_llm(activity, list(history), current_score)
     
-    meta = _extract_log_score_meta(apicall)
+    meta = _canonical_score_meta(activity, _extract_log_score_meta(apicall))
     if meta:
-        existing_score = db.table("score_logs").select("id").eq("student_id", student["id"]).eq("course_id", course["id"]).eq("activity_no", activity_no).eq("meta", meta).execute()
-        if not existing_score.data:
-            score_result = logScore(email, password, course["course_id"], activity_no, 1.0, meta)
-            if score_result.get("ok") and not score_result.get("duplicate"):
-                current_score += 1.0
+        try:
+            existing_score = _find_existing_score_log(db, student["id"], course["id"], activity_no, meta)
+            if existing_score:
+                response_text = _duplicate_objective_response(meta, history)
+            else:
+                score_result = logScore(email, password, course["course_id"], activity_no, 1.0, meta)
+                if score_result.get("ok") and not score_result.get("duplicate"):
+                    current_score += 1.0
+                elif score_result.get("duplicate"):
+                    response_text = _duplicate_objective_response(meta, history)
+        except Exception:
+            existing_score = _find_existing_score_log(db, student["id"], course["id"], activity_no, meta)
+            if existing_score:
+                response_text = _duplicate_objective_response(meta, history)
+            else:
+                response_text = "I understood your answer, but the score could not be updated right now. Please continue with the next idea."
             
     history.append({"role": "assistant", "content": response_text})
     _save_conversation_history(db, student["id"], course["id"], activity_no, history)
@@ -737,7 +969,13 @@ def logScore(email: str, password: str, course_id: str, activity_no: int, score:
         "meta": meta_text
     }
 
-    insert_res = db.table("score_logs").insert(insert_data).execute()
+    try:
+        insert_res = db.table("score_logs").insert(insert_data).execute()
+    except Exception:
+        existing_score = _find_existing_score_log(db, student["id"], course["id"], activity_no, meta_text)
+        if existing_score:
+            return {"ok": True, "score_log": existing_score, "duplicate": True}
+        raise
     
     if insert_res.data:
         return {"ok": True, "score_log": insert_res.data[0]}

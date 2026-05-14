@@ -29,6 +29,22 @@ def demoUi() -> FileResponse:
 
 
 # ==========================================
+# DEMO SETUP ROUTES
+# ==========================================
+
+@app.post("/demo/reset-data")
+def resetDemoData() -> dict:
+    from app import services
+    return services.resetDemoData()
+
+
+@app.post("/demo/seed-data")
+def seedDemoData() -> dict:
+    from app import services
+    return services.seedDemoData()
+
+
+# ==========================================
 # FEDERATED AUTH ROUTES
 # ==========================================
 

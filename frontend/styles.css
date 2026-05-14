@@ -843,6 +843,18 @@ button.compact-btn {
   color: var(--ink);
 }
 
+.chat-notice {
+  align-self: center;
+  max-width: 82%;
+  padding: 8px 12px;
+  border: 1px solid rgba(244, 200, 74, 0.3);
+  border-radius: 8px;
+  background: rgba(244, 200, 74, 0.1);
+  color: var(--yellow);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
 /* ─── CHAT INPUT AREA ─────────────────────────────────────────── */
 .chat-input-area {
   flex-shrink: 0;
