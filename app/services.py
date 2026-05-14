@@ -333,189 +333,64 @@ def get_db() -> Client:
 # ==========================================
 # DEMO SETUP APIs
 # ==========================================
+#
+# These wrappers call the SQL functions
+#   public.seed_demo_data()    — resources/database_sql/functions/seed_demo_data_function.sql
+#   public.delete_demo_data()  — resources/database_sql/functions/delete_demo_data_function.sql
+# via Supabase RPC. Both functions are idempotent and scoped to demo
+# identifiers (demo emails + demo course codes), so non-demo data is never
+# touched.
 
 DEMO_PASSWORD = "pass123"
-DEMO_IDS = {
-    "instructor_a": 302001,
-    "instructor_b": 302002,
-    "student_1": 302101,
-    "student_2": 302102,
-    "course_1": 302201,
-    "course_2": 302202,
-    "instructor_course_1": 302301,
-    "instructor_course_2": 302302,
-    "student_course_1": 302401,
-    "student_course_2": 302402,
-    "activity_1": 302501,
-    "activity_2": 302502,
-}
-DEMO_ACTIVITY_1_TEXT = (
-    "A student studies for an exam by rereading the textbook many times. Another "
-    "student studies by closing the book and trying to explain the ideas from "
-    "memory, then checking mistakes. Which strategy is likely to support better "
-    "long-term learning, and why?"
-)
-DEMO_ACTIVITY_1_OBJECTIVES = [
-    "Explain that active retrieval practice improves long-term learning more than passive rereading.",
-    "Explain that feedback after retrieval helps identify and correct misunderstandings.",
-]
-DEMO_ACTIVITY_2_TEXT = (
-    "A team is building a course registration feature. What user stories and "
-    "acceptance criteria would help the team validate the feature before release?"
-)
-DEMO_ACTIVITY_2_OBJECTIVES = [
-    "Write user stories from the perspective of the users who need the feature.",
-    "Define testable acceptance criteria that describe observable behavior.",
-]
-
-
-def _delete_all_rows(db, table_name: str) -> None:
-    db.table(table_name).delete().gte("id", 0).execute()
-
-
-def _insert_one(db, table_name: str, row: dict[str, object]) -> dict[str, object]:
-    response = db.table(table_name).insert(row).execute()
-    if not response.data:
-        raise ValueError(f"Failed to insert demo row into {table_name}")
-    return response.data[0]
+DEMO_INSTRUCTOR_A_EMAIL = "instructor1@mef.edu.tr"
+DEMO_INSTRUCTOR_B_EMAIL = "instructor2@mef.edu.tr"
+DEMO_STUDENT_1_EMAIL = "comp302.term.project@gmail.com"
+DEMO_STUDENT_2_EMAIL = "student2@mef.edu.tr"
+DEMO_COURSE_1_CODE = "SE101"
+DEMO_COURSE_2_CODE = "SE102"
 
 
 def resetDemoData() -> dict:
     db = get_db()
-    _reset_demo_data_with_db(db)
+    db.rpc("delete_demo_data", {}).execute()
     return {"ok": True, "message": "Demo data reset"}
 
 
-def _reset_demo_data_with_db(db) -> None:
-    for table_name in [
-        "conversation_state",
-        "score_logs",
-        "activities",
-        "student_courses",
-        "instructor_courses",
-        "students",
-        "instructors",
-        "courses",
-    ]:
-        _delete_all_rows(db, table_name)
+def _select_one(db, table_name: str, filters: dict[str, object], columns: str) -> dict[str, object]:
+    query = db.table(table_name).select(columns)
+    for column, value in filters.items():
+        query = query.eq(column, value)
+    response = query.execute()
+    if not response.data:
+        raise ValueError(f"Demo seed row missing from {table_name}: {filters}")
+    return response.data[0]
 
 
 def seedDemoData() -> dict:
     db = get_db()
-    _reset_demo_data_with_db(db)
+    db.rpc("seed_demo_data", {}).execute()
 
-    instructor_one = _insert_one(db, "instructors", {
-        "id": DEMO_IDS["instructor_a"],
-        "email": "instructor1@mef.edu.tr",
-        "full_name": "Instructor One",
-        "password": DEMO_PASSWORD,
-    })
-    instructor_two = _insert_one(db, "instructors", {
-        "id": DEMO_IDS["instructor_b"],
-        "email": "instructor2@mef.edu.tr",
-        "full_name": "Instructor Two",
-        "password": DEMO_PASSWORD,
-    })
-    student_one = _insert_one(db, "students", {
-        "id": DEMO_IDS["student_1"],
-        "email": "comp302.term.project@gmail.com",
-        "full_name": "Student One",
-        "password": DEMO_PASSWORD,
-    })
-    student_two = _insert_one(db, "students", {
-        "id": DEMO_IDS["student_2"],
-        "email": "student2@mef.edu.tr",
-        "full_name": "Student Two",
-        "password": DEMO_PASSWORD,
-    })
-    course_one = _insert_one(db, "courses", {
-        "id": DEMO_IDS["course_1"],
-        "course_id": "SE101",
-        "course_name": "Software Engineering 101",
-    })
-    course_two = _insert_one(db, "courses", {
-        "id": DEMO_IDS["course_2"],
-        "course_id": "SE102",
-        "course_name": "Software Engineering 102",
-    })
-
-    _insert_one(db, "instructor_courses", {
-        "id": DEMO_IDS["instructor_course_1"],
-        "instructor_id": instructor_one["id"],
-        "course_id": course_one["id"],
-    })
-    _insert_one(db, "instructor_courses", {
-        "id": DEMO_IDS["instructor_course_2"],
-        "instructor_id": instructor_two["id"],
-        "course_id": course_two["id"],
-    })
-    _insert_one(db, "student_courses", {
-        "id": DEMO_IDS["student_course_1"],
-        "student_id": student_one["id"],
-        "course_id": course_one["id"],
-    })
-    _insert_one(db, "student_courses", {
-        "id": DEMO_IDS["student_course_2"],
-        "student_id": student_two["id"],
-        "course_id": course_two["id"],
-    })
-    activity_one = _insert_one(db, "activities", {
-        "id": DEMO_IDS["activity_1"],
-        "course_id": course_one["id"],
-        "activity_no": 1,
-        "activity_text": DEMO_ACTIVITY_1_TEXT,
-        "learning_objectives": list(DEMO_ACTIVITY_1_OBJECTIVES),
-        "status": "NOT_STARTED",
-    })
-    activity_two = _insert_one(db, "activities", {
-        "id": DEMO_IDS["activity_2"],
-        "course_id": course_one["id"],
-        "activity_no": 2,
-        "activity_text": DEMO_ACTIVITY_2_TEXT,
-        "learning_objectives": list(DEMO_ACTIVITY_2_OBJECTIVES),
-        "status": "NOT_STARTED",
-    })
+    instructor_a = _select_one(db, "instructors", {"email": DEMO_INSTRUCTOR_A_EMAIL}, "id,email")
+    instructor_b = _select_one(db, "instructors", {"email": DEMO_INSTRUCTOR_B_EMAIL}, "id,email")
+    student_1    = _select_one(db, "students",    {"email": DEMO_STUDENT_1_EMAIL},    "id,email")
+    student_2    = _select_one(db, "students",    {"email": DEMO_STUDENT_2_EMAIL},    "id,email")
+    course_1     = _select_one(db, "courses",     {"course_id": DEMO_COURSE_1_CODE},  "id,course_id")
+    course_2     = _select_one(db, "courses",     {"course_id": DEMO_COURSE_2_CODE},  "id,course_id")
+    activity_1   = _select_one(db, "activities",  {"course_id": course_1["id"], "activity_no": 1}, "activity_no,status")
+    activity_2   = _select_one(db, "activities",  {"course_id": course_1["id"], "activity_no": 2}, "activity_no,status")
 
     return {
         "ok": True,
         "message": "Demo data seeded",
         "demo": {
-            "instructorA": {
-                "id": instructor_one["id"],
-                "email": instructor_one["email"],
-                "password": DEMO_PASSWORD,
-            },
-            "instructorB": {
-                "id": instructor_two["id"],
-                "email": instructor_two["email"],
-                "password": DEMO_PASSWORD,
-            },
-            "student1": {
-                "id": student_one["id"],
-                "email": student_one["email"],
-                "password": DEMO_PASSWORD,
-            },
-            "student2": {
-                "id": student_two["id"],
-                "email": student_two["email"],
-                "password": DEMO_PASSWORD,
-            },
-            "course1": {
-                "id": course_one["id"],
-                "course_id": course_one["course_id"],
-            },
-            "course2": {
-                "id": course_two["id"],
-                "course_id": course_two["course_id"],
-            },
-            "activity1": {
-                "activity_no": activity_one["activity_no"],
-                "status": activity_one["status"],
-            },
-            "activity2": {
-                "activity_no": activity_two["activity_no"],
-                "status": activity_two["status"],
-            },
+            "instructorA": {"id": instructor_a["id"], "email": instructor_a["email"], "password": DEMO_PASSWORD},
+            "instructorB": {"id": instructor_b["id"], "email": instructor_b["email"], "password": DEMO_PASSWORD},
+            "student1":    {"id": student_1["id"],    "email": student_1["email"],    "password": DEMO_PASSWORD},
+            "student2":    {"id": student_2["id"],    "email": student_2["email"],    "password": DEMO_PASSWORD},
+            "course1":     {"id": course_1["id"],     "course_id": course_1["course_id"]},
+            "course2":     {"id": course_2["id"],     "course_id": course_2["course_id"]},
+            "activity1":   {"activity_no": activity_1["activity_no"], "status": activity_1["status"]},
+            "activity2":   {"activity_no": activity_2["activity_no"], "status": activity_2["status"]},
         },
     }
 

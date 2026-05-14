@@ -127,6 +127,126 @@ class FakeQueryBuilder:
         return False
 
 
+_DEMO_INSTRUCTORS = (
+    ("instructor1@mef.edu.tr", "Instructor A"),
+    ("instructor2@mef.edu.tr", "Instructor B"),
+)
+_DEMO_STUDENTS = (
+    ("comp302.term.project@gmail.com", "Student One"),
+    ("student2@mef.edu.tr", "Student Two"),
+)
+_DEMO_COURSES = (
+    ("SE101", "Software Engineering 101"),
+    ("SE102", "Software Engineering 102"),
+)
+_DEMO_ACTIVITIES = (
+    (
+        1,
+        "Explain the concept of software requirements and give one clear example.",
+        ["Define software requirements", "Give one example of a functional requirement"],
+    ),
+    (
+        2,
+        "Explain the difference between functional and non-functional requirements.",
+        ["Define functional requirements", "Define non-functional requirements"],
+    ),
+)
+_DEMO_PASSWORD = "pass123"
+
+
+def _simulate_seed_demo_data(db):
+    def _upsert(table, match_key, row):
+        for existing in db.tables[table]:
+            if existing.get(match_key) == row[match_key]:
+                existing.update({k: v for k, v in row.items() if k != "id"})
+                return existing
+        new_row = dict(row)
+        new_row.setdefault("id", db.next_id(table))
+        db.tables[table].append(new_row)
+        return new_row
+
+    instructor_ids = [
+        _upsert("instructors", "email", {"email": email, "full_name": name, "password": _DEMO_PASSWORD})["id"]
+        for email, name in _DEMO_INSTRUCTORS
+    ]
+    student_ids = [
+        _upsert("students", "email", {"email": email, "full_name": name, "password": _DEMO_PASSWORD})["id"]
+        for email, name in _DEMO_STUDENTS
+    ]
+    course_ids = [
+        _upsert("courses", "course_id", {"course_id": code, "course_name": name})["id"]
+        for code, name in _DEMO_COURSES
+    ]
+
+    def _ensure_mapping(table, key_a, val_a, key_b, val_b):
+        for row in db.tables[table]:
+            if row.get(key_a) == val_a and row.get(key_b) == val_b:
+                return
+        db.tables[table].append({"id": db.next_id(table), key_a: val_a, key_b: val_b})
+
+    _ensure_mapping("instructor_courses", "instructor_id", instructor_ids[0], "course_id", course_ids[0])
+    _ensure_mapping("instructor_courses", "instructor_id", instructor_ids[1], "course_id", course_ids[1])
+    _ensure_mapping("student_courses", "student_id", student_ids[0], "course_id", course_ids[0])
+    _ensure_mapping("student_courses", "student_id", student_ids[1], "course_id", course_ids[1])
+
+    for activity_no, text, los in _DEMO_ACTIVITIES:
+        existing = next(
+            (
+                row
+                for row in db.tables["activities"]
+                if row.get("course_id") == course_ids[0] and row.get("activity_no") == activity_no
+            ),
+            None,
+        )
+        if existing:
+            existing.update(
+                {
+                    "activity_text": text,
+                    "learning_objectives": list(los),
+                    "status": "NOT_STARTED",
+                }
+            )
+        else:
+            db.tables["activities"].append(
+                {
+                    "id": db.next_id("activities"),
+                    "course_id": course_ids[0],
+                    "activity_no": activity_no,
+                    "activity_text": text,
+                    "learning_objectives": list(los),
+                    "status": "NOT_STARTED",
+                }
+            )
+
+
+def _simulate_delete_demo_data(db):
+    demo_instructor_emails = {email for email, _ in _DEMO_INSTRUCTORS}
+    demo_student_emails = {email for email, _ in _DEMO_STUDENTS}
+    demo_course_codes = {code for code, _ in _DEMO_COURSES}
+
+    instructor_ids = {row["id"] for row in db.tables["instructors"] if row.get("email") in demo_instructor_emails}
+    student_ids = {row["id"] for row in db.tables["students"] if row.get("email") in demo_student_emails}
+    course_ids = {row["id"] for row in db.tables["courses"] if row.get("course_id") in demo_course_codes}
+
+    def _filter_out(table, predicate):
+        db.tables[table] = [row for row in db.tables[table] if not predicate(row)]
+
+    _filter_out("score_logs", lambda r: r.get("student_id") in student_ids or r.get("course_id") in course_ids)
+    _filter_out("conversation_state", lambda r: r.get("student_id") in student_ids or r.get("course_id") in course_ids)
+    _filter_out("activities", lambda r: r.get("course_id") in course_ids)
+    _filter_out("student_courses", lambda r: r.get("student_id") in student_ids or r.get("course_id") in course_ids)
+    _filter_out("instructor_courses", lambda r: r.get("instructor_id") in instructor_ids or r.get("course_id") in course_ids)
+    _filter_out("students", lambda r: r.get("email") in demo_student_emails)
+    _filter_out("instructors", lambda r: r.get("email") in demo_instructor_emails)
+    _filter_out("courses", lambda r: r.get("course_id") in demo_course_codes)
+
+
+_RPC_SIMULATORS = {
+    "seed_demo_data": _simulate_seed_demo_data,
+    "delete_demo_data": _simulate_delete_demo_data,
+}
+
+
 class FakeRpcBuilder:
     def __init__(self, db, fn_name, params):
         self.db = db
@@ -135,6 +255,9 @@ class FakeRpcBuilder:
 
     def execute(self):
         self.db.rpc_calls.append({"fn": self.fn_name, "params": dict(self.params)})
+        simulator = _RPC_SIMULATORS.get(self.fn_name)
+        if simulator is not None:
+            simulator(self.db)
         return FakeResponse([{"ok": True}])
 
 
