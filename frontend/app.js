@@ -157,12 +157,35 @@
     renderTo("rawLastResponse", safe);
 
     const ok = safe && safe.ok === true;
-    setBadge(el("lastBadge"), ok ? "PASS" : httpOk ? "Backend response" : "Request failed", ok ? "success" : "warning");
+    const label = ok ? "PASS" : httpOk ? "Backend response" : "Request failed";
+    const kind = ok ? "success" : "warning";
+    setBadge(el("lastBadge"), label, kind);
+    setBadge(el("lastBadgeRail"), label, kind);
     setBadge(el("globalStatus"), ok ? "Last request passed" : "Evidence updated", ok ? "success" : "warning");
 
     history.unshift({ at: new Date().toISOString(), request: req, response: safe });
     if (history.length > 40) history.pop();
     renderHistory();
+  }
+
+  function initEvidenceToggle() {
+    const panel = el("evidencePanel");
+    const toggle = el("evidenceToggle");
+    if (!panel || !toggle) return;
+    const stored = localStorage.getItem("inclassEvidenceCollapsed") === "1";
+    if (stored) panel.classList.add("collapsed");
+    const sync = () => {
+      const collapsed = panel.classList.contains("collapsed");
+      toggle.textContent = collapsed ? "‹" : "›";
+      toggle.setAttribute("aria-label", collapsed ? "Expand evidence panel" : "Collapse evidence panel");
+      toggle.setAttribute("title", collapsed ? "Expand evidence panel" : "Collapse evidence panel");
+    };
+    sync();
+    toggle.addEventListener("click", () => {
+      panel.classList.toggle("collapsed");
+      localStorage.setItem("inclassEvidenceCollapsed", panel.classList.contains("collapsed") ? "1" : "0");
+      sync();
+    });
   }
 
   function instructorParams(extra) {
@@ -252,7 +275,13 @@
     })),
 
     // ── Student auth ─────────────────────────────────────────────
-    studentLogin: () => apiCall("/student/login", studentParams()),
+    studentLogin: async () => {
+      const result = await apiCall("/student/login", studentParams());
+      if (result.data && result.data.ok) {
+        updateStudentIdentity({ email: value("studentEmail"), mode: "email" });
+      }
+      return result;
+    },
     setStudentPassword: () => apiCall("/student/set-password", studentParams()),
     changeStudentPassword: () => apiCall("/student/change-password", studentParams({
       old_password: value("studentOldPassword"),
@@ -266,7 +295,13 @@
       return result;
     },
     startTutoring: () => tutoring(""),
-    submitAnswer: () => tutoring(value("studentAnswer")),
+    submitAnswer: () => {
+      const answer = value("studentAnswer");
+      if (!answer) return Promise.resolve({ data: null });
+      const node = el("studentAnswer");
+      if (node) node.value = "";
+      return tutoring(answer);
+    },
     logScore: async () => {
       const result = await apiCall("/student/log-score", studentParams(Object.assign(courseActivity(), {
         score: numberValue("studentScore"),
@@ -322,24 +357,52 @@
     if (welcome && !welcome.classList.contains("hidden")) {
       welcome.classList.add("hidden");
     }
-    const node = document.createElement("div");
-    node.className = "message " + kind;
-    node.textContent = text;
-    el("chatPanel").appendChild(node);
-    el("chatPanel").scrollTop = el("chatPanel").scrollHeight;
+    const wrapper = document.createElement("div");
+    wrapper.className = "message-row " + kind;
+
+    if (kind === "assistant") {
+      const avatar = document.createElement("div");
+      avatar.className = "message-avatar";
+      avatar.textContent = "IC";
+      wrapper.appendChild(avatar);
+    }
+
+    const bubble = document.createElement("div");
+    bubble.className = "message " + kind;
+
+    const label = document.createElement("div");
+    label.className = "message-label";
+    label.textContent = kind === "student" ? "You" : "AI Tutor";
+    bubble.appendChild(label);
+
+    const body = document.createElement("div");
+    body.className = "message-body";
+    body.textContent = text;
+    bubble.appendChild(body);
+
+    wrapper.appendChild(bubble);
+
+    const panel = el("chatPanel");
+    panel.appendChild(wrapper);
+    panel.scrollTop = panel.scrollHeight;
   }
 
   function renderActivity(data) {
     const activity = data && (data.activity || data);
     const text = activity && (activity.activity_text || activity.text || activity.content);
-    el("activityDisplay").textContent = text || "No student-facing activity text found in response.";
+    const ok = data && data.ok !== false && text;
+    el("activityDisplay").textContent = text || "No student-facing activity text in response.";
 
-    // Update the chat header badge with course + activity info.
+    // Update the chat header with course + activity info.
     const courseBadge = el("chatCourseBadge");
     if (courseBadge) {
-      const course = value("courseId") || "Course";
-      const actNo = value("activityNo") || "?";
-      courseBadge.textContent = course + " — Activity " + actNo;
+      if (ok) {
+        const course = value("courseId") || "Course";
+        const actNo = value("activityNo") || "?";
+        courseBadge.textContent = course + " · Activity " + actNo;
+      } else {
+        courseBadge.textContent = "No activity loaded";
+      }
     }
 
     const leaked = !!(activity && activity.learning_objectives);
@@ -524,6 +587,8 @@
 
   // ── Google Identity Services ───────────────────────────────────
   let pendingGoogleRole = null;
+  let cachedGoogleClientId = "";
+  let googleClientIdError = "";
 
   function setGoogleStatus(role, message, kind) {
     const statusEl = el(role === "instructor" ? "googleStatusInstructor" : "googleStatusStudent");
@@ -531,6 +596,39 @@
     statusEl.textContent = message;
     statusEl.className = "google-status" + (kind ? " " + kind : "");
     statusEl.classList.remove("hidden");
+  }
+
+  function setGoogleStatusBoth(message, kind) {
+    setGoogleStatus("instructor", message, kind);
+    setGoogleStatus("student", message, kind);
+  }
+
+  function applyGoogleSessionLocally(role, email, sessionToken) {
+    if (!sessionToken) return;
+    const emailField = role === "instructor" ? "instructorEmail" : "studentEmail";
+    const passwordField = role === "instructor" ? "instructorPassword" : "studentPassword";
+    if (email) setValue(emailField, email);
+    setValue(passwordField, sessionToken);
+    setBadge(el("globalStatus"), role === "instructor" ? "Instructor signed in" : "Student signed in", "success");
+    updateStudentIdentity({ email: email, mode: "Google" });
+  }
+
+  function updateStudentIdentity(opts) {
+    const nameEl = el("studentIdentityName");
+    const subEl = el("studentIdentitySub");
+    const avatarEl = el("studentIdentityAvatar");
+    if (!nameEl || !subEl || !avatarEl) return;
+    if (opts && opts.email) {
+      nameEl.textContent = opts.email;
+      subEl.textContent = opts.mode ? "Signed in via " + opts.mode : "Signed in";
+      avatarEl.textContent = String(opts.email)[0].toUpperCase();
+      avatarEl.classList.add("active");
+    } else {
+      nameEl.textContent = "Not signed in";
+      subEl.textContent = "Sign in to load your activity.";
+      avatarEl.textContent = "S";
+      avatarEl.classList.remove("active");
+    }
   }
 
   function initGoogleIdentityServices(clientId) {
@@ -546,61 +644,93 @@
         }
         setGoogleStatus(role, "Verifying with backend…", "");
         const result = await actions.googleLogin(response.credential, role);
-        const ok = result.data && result.data.ok;
-        setGoogleStatus(role,
-          ok ? "Signed in with Google." : "Backend rejected: " + (result.data && result.data.error),
-          ok ? "ok" : "fail");
-        renderTo(role === "instructor" ? "instructorOut" : "studentOut", result.data);
+        const data = result.data || {};
+        const ok = data.ok === true;
+        if (ok) {
+          applyGoogleSessionLocally(data.role || role, data.email, data.session_token);
+          setGoogleStatus(role,
+            "Signed in with Google as " + (data.email || "(unknown)") + ". Session stored as password.",
+            "ok");
+        } else {
+          setGoogleStatus(role,
+            "Backend rejected Google credential: " + (data.error || "unknown error"),
+            "fail");
+        }
+        renderTo(role === "instructor" ? "instructorOut" : "studentOut", data);
       },
       auto_select: false,
       cancel_on_tap_outside: true,
+      use_fedcm_for_prompt: true,
+    });
+
+    renderOfficialGoogleButtons();
+  }
+
+  function renderOfficialGoogleButtons() {
+    if (!window.google || !window.google.accounts || !window.google.accounts.id) return;
+    document.querySelectorAll("[data-google-host-role]").forEach((host) => {
+      if (host.dataset.rendered === "1") return;
+      const role = host.dataset.googleHostRole;
+      host.addEventListener("click", () => { pendingGoogleRole = role; }, true);
+      try {
+        window.google.accounts.id.renderButton(host, {
+          type: "standard",
+          theme: "filled_blue",
+          size: "large",
+          text: "signin_with",
+          shape: "pill",
+          logo_alignment: "left",
+        });
+        host.dataset.rendered = "1";
+      } catch (err) {
+        // renderButton failed; surface the error inline.
+        const statusEl = el(role === "instructor" ? "googleStatusInstructor" : "googleStatusStudent");
+        if (statusEl) {
+          statusEl.textContent = "Could not render Google button: " + (err && err.message || err);
+          statusEl.className = "google-status fail";
+          statusEl.classList.remove("hidden");
+        }
+      }
     });
   }
 
-  function initGoogleButtons() {
-    document.querySelectorAll("[data-google-role]").forEach((button) => {
-      button.addEventListener("click", () => {
-        const role = button.dataset.googleRole;
-        pendingGoogleRole = role;
-
-        if (!window.google || !window.google.accounts || !window.google.accounts.id) {
-          setGoogleStatus(role, "Google Identity Services not yet loaded — check your connection.", "fail");
-          return;
-        }
-
-        setGoogleStatus(role, "Opening Google sign-in…", "");
-        window.google.accounts.id.prompt((notification) => {
-          if (notification.isNotDisplayed()) {
-            setGoogleStatus(role,
-              "Sign-in dialog blocked (" + notification.getNotDisplayedReason() + "). " +
-              "Add this origin to Authorized JavaScript Origins in Google Cloud Console.",
-              "fail");
-          } else if (notification.isSkippedMoment()) {
-            setGoogleStatus(role, "Dismissed — click again to retry.", "fail");
-          }
-        });
-      });
+  function fillGoogleOriginHints() {
+    const origin = window.location.origin || "";
+    ["googleOriginInstructor", "googleOriginStudent"].forEach((id) => {
+      const node = el(id);
+      if (node) node.textContent = origin || "(unknown)";
     });
   }
 
   async function loadGoogleClientId() {
     try {
       const resp = await fetch(baseUrl() + "/auth/google-client-id");
-      if (!resp.ok) return;
-      const data = await resp.json();
-      if (!data.client_id) return;
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.client_id) {
+        cachedGoogleClientId = "";
+        googleClientIdError = data.error ||
+          "Backend did not return a Google client ID (HTTP " + resp.status + ").";
+        setGoogleStatusBoth(googleClientIdError, "fail");
+        return;
+      }
 
-      const clientId = data.client_id;
+      cachedGoogleClientId = data.client_id;
+      googleClientIdError = "";
+
       const tryInit = () => {
         if (window.google && window.google.accounts && window.google.accounts.id) {
-          initGoogleIdentityServices(clientId);
+          initGoogleIdentityServices(cachedGoogleClientId);
         } else {
           setTimeout(tryInit, 300);
         }
       };
       tryInit();
-    } catch (_) {
-      // GIS unavailable (offline) — silent fail, buttons just won't render.
+    } catch (err) {
+      cachedGoogleClientId = "";
+      googleClientIdError =
+        "Could not reach /auth/google-client-id (" + (err && err.message || err) + "). " +
+        "Is the backend running at " + baseUrl() + "?";
+      setGoogleStatusBoth(googleClientIdError, "fail");
     }
   }
 
@@ -619,8 +749,21 @@
 
   async function runAction(name) {
     const result = await actions[name]();
-    renderTo(visibleOutputForAction(name), result.data);
+    if (result && result.data !== null && result.data !== undefined) {
+      renderTo(visibleOutputForAction(name), result.data);
+    }
     return result;
+  }
+
+  function initChatComposer() {
+    const textarea = el("studentAnswer");
+    if (!textarea) return;
+    textarea.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+        event.preventDefault();
+        runAction("submitAnswer");
+      }
+    });
   }
 
   // ── Button wiring ──────────────────────────────────────────────
@@ -735,9 +878,12 @@
     initNavigation();
     initInnerTabs();
     initButtons();
-    initGoogleButtons();
+    initChatComposer();
+    initEvidenceToggle();
     initFlow();
     renderHistory();
+    fillGoogleOriginHints();
     loadGoogleClientId();
+    updateStudentIdentity(null);
   });
 }());

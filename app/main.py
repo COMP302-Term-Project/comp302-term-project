@@ -1,9 +1,16 @@
+import os
 from pathlib import Path
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-  
+
+# Load .env before any route reads os.environ. services.py also calls
+# load_dotenv() defensively, but /auth/google-client-id is reached before
+# services.py is lazily imported by other routes, so it must be loaded here.
+load_dotenv()
+
 app = FastAPI()
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
@@ -35,10 +42,16 @@ def googleLogin(payload: dict) -> dict:
 
 @app.get("/auth/google-client-id")
 def googleClientId() -> dict:
-    import os
-    client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
+    client_id = (os.environ.get("GOOGLE_CLIENT_ID") or "").strip()
     if not client_id:
-        return {"ok": False, "client_id": "", "error": "GOOGLE_CLIENT_ID is not configured"}
+        return {
+            "ok": False,
+            "client_id": "",
+            "error": (
+                "GOOGLE_CLIENT_ID is not configured. Set it in .env "
+                "and restart the server."
+            ),
+        }
     return {"ok": True, "client_id": client_id}
 
 

@@ -240,16 +240,9 @@ Apply it to a short example</textarea>
 
               <div class="or-divider"><span>or</span></div>
 
-              <button class="google-btn" data-google-role="instructor">
-                <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                  <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.716v2.258h2.908C16.658 13.952 17.64 11.645 17.64 9.2z" fill="#4285F4"/>
-                  <path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z" fill="#34A853"/>
-                  <path d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/>
-                  <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 6.29C4.672 4.163 6.656 3.58 9 3.58z" fill="#EA4335"/>
-                </svg>
-                Sign in with Google
-              </button>
+              <div class="google-button-host" data-google-host-role="instructor"></div>
               <p id="googleStatusInstructor" class="google-status hidden"></p>
+              <p class="google-origin-hint">Origin sent to Google: <code id="googleOriginInstructor">—</code>. Add this <strong>exact string</strong> to Authorized JavaScript Origins.</p>
 
               <div class="form-section-label">Change password</div>
               <div class="grid-two">
@@ -289,85 +282,110 @@ Apply it to a short example</textarea>
 
         <!-- Student sidebar -->
         <div class="student-sidebar">
-          <section class="card">
-            <h3>Sign in</h3>
-            <div class="actions">
-              <button data-action="studentLogin">Login with email</button>
-              <button data-action="setStudentPassword" class="secondary">Set password</button>
-            </div>
-
-            <div class="or-divider"><span>or</span></div>
-
-            <button class="google-btn" data-google-role="student">
-              <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.716v2.258h2.908C16.658 13.952 17.64 11.645 17.64 9.2z" fill="#4285F4"/>
-                <path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z" fill="#34A853"/>
-                <path d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/>
-                <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 6.29C4.672 4.163 6.656 3.58 9 3.58z" fill="#EA4335"/>
-              </svg>
-              Sign in with Google
-            </button>
-            <p id="googleStatusStudent" class="google-status hidden"></p>
-
-            <div class="form-section-label">Change password</div>
-            <div class="grid-two">
-              <div class="field">
-                <label for="studentOldPassword">Current password</label>
-                <input id="studentOldPassword" type="password">
-              </div>
-              <div class="field">
-                <label for="studentNewPassword">New password</label>
-                <input id="studentNewPassword" type="password">
+          <section class="card identity-card">
+            <div class="identity-line">
+              <div class="identity-avatar" id="studentIdentityAvatar">S</div>
+              <div class="identity-body">
+                <div class="identity-name" id="studentIdentityName">Not signed in</div>
+                <div class="identity-sub" id="studentIdentitySub">Sign in to load your activity.</div>
               </div>
             </div>
-            <button data-action="changeStudentPassword" class="secondary full-w">Change password</button>
           </section>
+
+          <details class="card collapsible" id="studentAuthCard">
+            <summary>
+              <h3>Sign in</h3>
+              <span class="hint">email or Google</span>
+            </summary>
+            <div class="collapsible-body">
+              <div class="actions">
+                <button data-action="studentLogin">Login with email</button>
+                <button data-action="setStudentPassword" class="secondary">Set password</button>
+              </div>
+
+              <div class="or-divider"><span>or</span></div>
+
+              <div class="google-button-host" data-google-host-role="student"></div>
+              <p id="googleStatusStudent" class="google-status hidden"></p>
+              <p class="google-origin-hint">Origin sent to Google: <code id="googleOriginStudent">—</code>. Add this <strong>exact string</strong> to Authorized JavaScript Origins.</p>
+
+              <div class="form-section-label">Change password</div>
+              <div class="grid-two">
+                <div class="field">
+                  <label for="studentOldPassword">Current password</label>
+                  <input id="studentOldPassword" type="password">
+                </div>
+                <div class="field">
+                  <label for="studentNewPassword">New password</label>
+                  <input id="studentNewPassword" type="password">
+                </div>
+              </div>
+              <button data-action="changeStudentPassword" class="secondary full-w">Change password</button>
+            </div>
+          </details>
 
           <section class="card">
             <div class="split-head">
-              <h3>Active Activity</h3>
+              <h3>Current activity</h3>
               <button data-action="getActivity" class="secondary compact-btn">Load</button>
             </div>
             <div id="objectiveWarning" class="integrity-pill warning">Hidden instructional fields are not exposed.</div>
             <div id="activityDisplay" class="activity-display">No active activity loaded yet.</div>
           </section>
 
-          <section class="card score-card">
-            <h3>Score &amp; State</h3>
-            <div id="studentStateDisplay" class="score-display">No score yet</div>
-            <div class="form-section-label" style="margin-top:14px">Manual score test</div>
-            <div class="grid-two">
-              <div class="field">
-                <label for="studentScore">Score</label>
-                <input id="studentScore" type="number" step="0.01" value="1">
+          <details class="card collapsible" id="studentDemoCard">
+            <summary>
+              <h3>Score evidence</h3>
+              <span class="hint">demo helper</span>
+            </summary>
+            <div class="collapsible-body">
+              <div id="studentStateDisplay" class="score-display">No score yet</div>
+              <div class="form-section-label">Manual score test</div>
+              <div class="grid-two">
+                <div class="field">
+                  <label for="studentScore">Score</label>
+                  <input id="studentScore" type="number" step="0.01" value="1">
+                </div>
+                <div class="field">
+                  <label for="scoreMeta">Meta</label>
+                  <input id="scoreMeta" value="demo">
+                </div>
               </div>
-              <div class="field">
-                <label for="scoreMeta">Meta</label>
-                <input id="scoreMeta" value="demo">
-              </div>
+              <button data-action="logScore" class="secondary full-w">Log score</button>
             </div>
-            <button data-action="logScore" class="secondary full-w">Log score</button>
-          </section>
+          </details>
         </div>
 
         <!-- Chat main area -->
         <div class="student-chat-main">
           <div class="chat-header">
-            <span id="chatCourseBadge" class="chat-course-badge">No activity loaded</span>
-            <div id="chatScorePill" class="badge badge-neutral" style="display:none"></div>
+            <div class="chat-header-left">
+              <span class="chat-tutor-mark">IC</span>
+              <div>
+                <div class="chat-title">AI Tutor</div>
+                <div id="chatCourseBadge" class="chat-course-sub">No activity loaded</div>
+              </div>
+            </div>
+            <div id="chatScorePill" class="badge badge-info" style="display:none"></div>
           </div>
 
           <div id="chatPanel" class="chat-panel">
             <div class="tutor-welcome" id="tutorWelcome">
               <div class="tutor-avatar">IC</div>
               <h2>Hi, I am your AI Tutor.</h2>
-              <p>Load an active activity using the panel on the left, then start a conversation or submit your answer below.</p>
+              <p>I'm here to help you work through this activity. Once your instructor starts an activity, load it from the panel on the left and I'll guide you.</p>
+              <div class="welcome-hints">
+                <div class="hint-chip">Submit an answer for guided feedback</div>
+                <div class="hint-chip">Ask follow-up questions</div>
+                <div class="hint-chip">Your conversation is private to you</div>
+              </div>
             </div>
           </div>
 
           <div class="chat-input-area">
-            <textarea id="studentAnswer" rows="3" placeholder="Type your answer or ask the tutor a question..."></textarea>
+            <textarea id="studentAnswer" rows="3" placeholder="Type your answer or ask the tutor a question… (Enter to send, Shift+Enter for new line)"></textarea>
             <div class="chat-actions">
+              <span class="composer-hint">Enter to send · Shift+Enter for new line</span>
               <button data-action="startTutoring" class="secondary">Ask tutor</button>
               <button data-action="submitAnswer">Submit answer</button>
             </div>
@@ -461,18 +479,26 @@ Apply it to a short example</textarea>
     </main>
 
     <!-- RIGHT: Live evidence panel -->
-    <aside class="evidence-panel">
-      <div class="panel-head">
-        <div>
-          <p class="eyebrow">Live evidence</p>
-          <h2>Last Response</h2>
+    <aside class="evidence-panel" id="evidencePanel">
+      <button type="button" class="evidence-toggle" id="evidenceToggle"
+              aria-label="Collapse evidence panel" title="Collapse evidence panel">›</button>
+      <div class="evidence-content">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Live evidence</p>
+            <h2>Last Response</h2>
+          </div>
+          <span id="lastBadge" class="badge badge-neutral">No response yet</span>
         </div>
-        <span id="lastBadge" class="badge badge-neutral">No response yet</span>
+        <h3>Sanitized request</h3>
+        <pre id="lastSummary" class="output compact-output"></pre>
+        <h3>Raw response</h3>
+        <pre id="lastResponse" class="output evidence-output"></pre>
       </div>
-      <h3>Sanitized request</h3>
-      <pre id="lastSummary" class="output compact-output"></pre>
-      <h3>Raw response</h3>
-      <pre id="lastResponse" class="output evidence-output"></pre>
+      <div class="evidence-rail" aria-hidden="true">
+        <span class="evidence-rail-label">Evidence</span>
+        <span id="lastBadgeRail" class="badge badge-neutral">No response</span>
+      </div>
     </aside>
 
   </div>

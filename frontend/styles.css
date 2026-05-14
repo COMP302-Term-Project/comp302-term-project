@@ -44,6 +44,11 @@ h4 { margin-bottom: 12px; font-size: 15px; }
   display: grid;
   grid-template-columns: 250px minmax(0, 1fr) 340px;
   min-height: 100vh;
+  transition: grid-template-columns 0.2s ease;
+}
+
+.app-shell:has(.evidence-panel.collapsed) {
+  grid-template-columns: 250px minmax(0, 1fr) 44px;
 }
 
 /* ─── SIDEBAR ────────────────────────────────────────────────── */
@@ -64,6 +69,68 @@ h4 { margin-bottom: 12px; font-size: 15px; }
   border-right: 0;
   border-left: 1px solid var(--line);
   padding: 20px;
+  position: sticky;
+  top: 0;
+}
+
+.evidence-toggle {
+  position: absolute;
+  top: 14px;
+  left: -16px;
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+  border-radius: 50%;
+  padding: 0;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  color: var(--soft);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+}
+
+.evidence-toggle:hover { background: var(--panel-3); filter: none; }
+
+.evidence-content { display: block; }
+
+.evidence-rail {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding-top: 8px;
+}
+
+.evidence-rail-label {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.evidence-panel.collapsed {
+  padding: 14px 4px;
+  width: 44px;
+  overflow: visible;
+}
+
+.evidence-panel.collapsed .evidence-content { display: none; }
+
+.evidence-panel.collapsed .evidence-rail { display: flex; }
+
+.evidence-panel.collapsed #lastBadgeRail {
+  font-size: 10px;
+  padding: 2px 6px;
+  min-height: 18px;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
 }
 
 .brand-block {
@@ -376,28 +443,7 @@ button.compact-btn {
   margin-top: 12px;
 }
 
-/* ─── GOOGLE BUTTON ───────────────────────────────────────────── */
-.google-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  width: 100%;
-  min-height: 42px;
-  border: 1px solid #cbd5e1;
-  border-radius: 10px;
-  padding: 9px 16px;
-  background: #ffffff;
-  color: #1a1a1a;
-  font-weight: 700;
-  font-size: 14px;
-  cursor: pointer;
-  margin: 10px 0 4px;
-  transition: background 0.15s;
-}
-
-.google-btn:hover { background: #f1f5f9; filter: none; }
-
+/* ─── GOOGLE SIGN-IN ──────────────────────────────────────────── */
 .google-status {
   margin: 0 0 8px;
   font-size: 13px;
@@ -407,6 +453,34 @@ button.compact-btn {
 
 .google-status.ok   { color: var(--green); }
 .google-status.fail { color: var(--red); }
+
+/* Container for the official Google-rendered button. */
+.google-button-host {
+  display: flex;
+  justify-content: center;
+  margin: 10px 0 4px;
+  min-height: 0;
+}
+
+.google-button-host:empty { display: none; }
+
+.google-origin-hint {
+  margin: 6px 0 4px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.google-origin-hint code {
+  background: #060b14;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 1px 6px;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  color: #9dd0ff;
+  user-select: all;
+}
 
 /* ─── OR DIVIDER ──────────────────────────────────────────────── */
 .or-divider {
@@ -617,18 +691,44 @@ button.compact-btn {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 18px;
+  padding: 14px 20px;
   border-bottom: 1px solid rgba(53, 208, 200, 0.2);
+  flex-shrink: 0;
+  background: linear-gradient(180deg, rgba(53, 208, 200, 0.05), transparent);
+}
+
+.chat-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.chat-tutor-mark {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: linear-gradient(145deg, var(--blue), var(--cyan));
+  color: #04111f;
+  font-weight: 900;
+  font-size: 13px;
   flex-shrink: 0;
 }
 
-.chat-course-badge {
-  padding: 5px 14px;
-  border-radius: 999px;
-  background: rgba(53, 208, 200, 0.12);
+.chat-title {
+  color: var(--ink);
+  font-weight: 800;
+  font-size: 15px;
+  line-height: 1.1;
+}
+
+.chat-course-sub {
+  margin-top: 2px;
   color: var(--cyan);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 /* ─── CHAT PANEL ──────────────────────────────────────────────── */
@@ -680,23 +780,64 @@ button.compact-btn {
 }
 
 /* ─── CHAT MESSAGES ───────────────────────────────────────────── */
-.message {
+.message-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  max-width: 100%;
+}
+
+.message-row.assistant {
+  align-self: flex-start;
+  max-width: 86%;
+}
+
+.message-row.student {
+  align-self: flex-end;
+  justify-content: flex-end;
   max-width: 80%;
-  border-radius: 16px;
-  padding: 12px 16px;
+}
+
+.message-avatar {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: linear-gradient(145deg, var(--blue), var(--cyan));
+  color: #04111f;
+  font-weight: 900;
+  font-size: 11px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.message {
+  flex: 1;
+  border-radius: 14px;
+  padding: 10px 14px;
   line-height: 1.5;
   font-size: 15px;
 }
 
+.message-label {
+  margin-bottom: 4px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.message-body { white-space: pre-wrap; word-wrap: break-word; }
+
 .message.assistant {
-  align-self: flex-start;
-  background: rgba(53, 208, 200, 0.12);
+  background: rgba(53, 208, 200, 0.1);
   border: 1px solid rgba(53, 208, 200, 0.28);
   color: var(--ink);
 }
 
 .message.student {
-  align-self: flex-end;
   background: rgba(78, 165, 255, 0.15);
   border: 1px solid rgba(78, 165, 255, 0.32);
   color: var(--ink);
@@ -726,7 +867,117 @@ button.compact-btn {
 .chat-actions {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
   gap: 8px;
+}
+
+.composer-hint {
+  margin-right: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.welcome-hints {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.hint-chip {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(53, 208, 200, 0.25);
+  background: rgba(53, 208, 200, 0.06);
+  color: var(--soft);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* ─── COLLAPSIBLE CARD ───────────────────────────────────────── */
+.card.collapsible { padding: 0; }
+
+.card.collapsible > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px;
+  user-select: none;
+}
+
+.card.collapsible > summary::-webkit-details-marker { display: none; }
+
+.card.collapsible > summary h3 { margin: 0; font-size: 16px; }
+
+.card.collapsible > summary::after {
+  content: "▾";
+  color: var(--muted);
+  font-size: 12px;
+  transition: transform 0.15s;
+}
+
+.card.collapsible[open] > summary::after { transform: rotate(180deg); }
+
+.card.collapsible .hint {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-right: 6px;
+  margin-left: auto;
+}
+
+.card.collapsible .collapsible-body {
+  padding: 0 20px 18px;
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+}
+
+/* ─── STUDENT IDENTITY CARD ──────────────────────────────────── */
+.identity-card { padding: 14px 16px; }
+
+.identity-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.identity-avatar {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: #1e2d44;
+  color: var(--muted);
+  font-weight: 900;
+  font-size: 15px;
+  flex-shrink: 0;
+  border: 1px solid var(--line);
+}
+
+.identity-avatar.active {
+  background: linear-gradient(145deg, var(--blue), var(--cyan));
+  color: #04111f;
+  border-color: transparent;
+}
+
+.identity-name {
+  color: var(--ink);
+  font-weight: 700;
+  font-size: 14px;
+  word-break: break-all;
+}
+
+.identity-sub {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 /* ─── DEMO FLOW ───────────────────────────────────────────────── */
