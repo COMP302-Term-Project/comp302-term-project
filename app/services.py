@@ -495,15 +495,58 @@ def _save_conversation_history(db, student_id: int, course_id: int, activity_no:
     ).execute()
 
 
-def _get_student_score(db, student_id: int, course_id: int, activity_no: int) -> float:
-    scores_resp = db.table("score_logs").select("score").eq("student_id", student_id).eq("course_id", course_id).eq("activity_no", activity_no).execute()
-    return sum(record.get("score", 0.0) for record in scores_resp.data) if scores_resp.data else 0.0
+def _get_student_score_logs(db, student_id: int, course_id: int, activity_no: int) -> list[dict]:
+    scores_resp = (
+        db.table("score_logs")
+        .select("score,meta")
+        .eq("student_id", student_id)
+        .eq("course_id", course_id)
+        .eq("activity_no", activity_no)
+        .execute()
+    )
+    return scores_resp.data or []
 
 
 def _normalize_score_meta(value: object) -> str:
     if _is_blank(value):
         return ""
     return " ".join(str(value).strip().lower().split())
+
+
+def _learning_objectives(activity: dict) -> list[str]:
+    objectives = activity.get("learning_objectives") or []
+    if not isinstance(objectives, list):
+        return []
+    return [str(objective).strip() for objective in objectives if not _is_blank(objective)]
+
+
+def _matching_learning_objective(activity: dict, meta: object) -> str | None:
+    normalized_meta = _normalize_score_meta(meta)
+    if not normalized_meta:
+        return None
+
+    for objective in _learning_objectives(activity):
+        if _normalize_score_meta(objective) == normalized_meta:
+            return objective
+
+    return None
+
+
+def _achieved_learning_objectives(activity: dict, score_logs: list[dict]) -> list[str]:
+    objectives_by_meta = {
+        _normalize_score_meta(objective): objective
+        for objective in _learning_objectives(activity)
+    }
+    achieved = []
+    seen = set()
+
+    for score_log in score_logs:
+        normalized_meta = _normalize_score_meta(score_log.get("meta"))
+        if normalized_meta in objectives_by_meta and normalized_meta not in seen:
+            achieved.append(objectives_by_meta[normalized_meta])
+            seen.add(normalized_meta)
+
+    return achieved
 
 
 def _find_existing_score_log(db, student_id: int, course_id: int, activity_no: int, meta: str) -> dict | None:
@@ -556,9 +599,82 @@ def _build_followup_tutoring_response(history: list[dict[str, str]]) -> str:
     return followups[turn_index % len(followups)]
 
 
-def _build_tutoring_llm_messages(activity: dict, history: list[dict[str, str]], current_score: float = 0.0) -> list[dict[str, str]]:
-    learning_objectives = activity.get("learning_objectives") or []
+def _build_completion_tutoring_response(score: float) -> str:
+    return f"Nice work, you have completed this activity. Your total score is {score:g}."
+
+
+def _strip_trailing_question(response_text: str) -> str:
+    lines = response_text.rstrip().splitlines()
+    while lines and not lines[-1].strip():
+        lines.pop()
+
+    if lines and lines[-1].strip().endswith("?"):
+        lines.pop()
+
+    return "\n".join(lines).rstrip()
+
+
+_SCORE_KEYWORD_PATTERN = re.compile(r"(?i)\b(?:scores?|totals?|points?)\b")
+_SENTENCE_PATTERN = re.compile(r"[^.!?\n]+[.!?]+|[^.!?\n]+")
+_DIGIT_RUN_PATTERN = re.compile(r"\d+")
+
+
+def _strip_score_mismatch_sentences(text: str, score: float) -> str:
+    expected = f"{score:g}"
+
+    def keep_sentence(sentence: str) -> bool:
+        if not _SCORE_KEYWORD_PATTERN.search(sentence):
+            return True
+        numbers = _DIGIT_RUN_PATTERN.findall(sentence)
+        if not numbers:
+            return True
+        return any(number == expected for number in numbers)
+
+    rebuilt_lines = []
+    for line in text.splitlines():
+        sentences = _SENTENCE_PATTERN.findall(line)
+        if not sentences:
+            rebuilt_lines.append(line)
+            continue
+        rebuilt_lines.append("".join(s for s in sentences if keep_sentence(s)))
+    cleaned = "\n".join(rebuilt_lines)
+    cleaned = re.sub(r"[ \t]+", " ", cleaned)
+    return cleaned.strip()
+
+
+def _finalize_completion_response(response_text: str, score: float) -> str:
+    completion_text = _build_completion_tutoring_response(score)
+    cleaned_response = _strip_score_mismatch_sentences(response_text, score)
+    cleaned_response = _strip_trailing_question(cleaned_response)
+
+    if completion_text.lower() in cleaned_response.lower():
+        return cleaned_response
+
+    if cleaned_response:
+        return f"{cleaned_response}\n\n{completion_text}"
+
+    return completion_text
+
+
+def _build_tutoring_llm_messages(
+    activity: dict,
+    history: list[dict[str, str]],
+    current_score: float = 0.0,
+    achieved_objectives: list[str] | None = None,
+) -> list[dict[str, str]]:
+    learning_objectives = _learning_objectives(activity)
+    achieved_objectives = achieved_objectives or []
+    achieved_text = "\n".join(f"- {objective}" for objective in achieved_objectives) or "- None"
+    remaining_objectives = [
+        objective
+        for objective in learning_objectives
+        if _normalize_score_meta(objective) not in {
+            _normalize_score_meta(achieved_objective)
+            for achieved_objective in achieved_objectives
+        }
+    ]
     objectives_text = "\n".join(f"- {objective}" for objective in learning_objectives)
+    remaining_text = "\n".join(f"- {objective}" for objective in remaining_objectives) or "- None"
     system_prompt = (
         "ROLE: Warm university instructor. Teach for conceptual mastery using Socratic questions and academic explanations.\n\n"
         "STRICT OUTPUT STYLE:\n"
@@ -577,12 +693,18 @@ def _build_tutoring_llm_messages(activity: dict, history: list[dict[str, str]], 
         "HARD RULES:\n"
         "- Never explain or directly teach anything before a score is earned.\n"
         "- Never use the words 'LO' or 'Learning Objective'.\n"
+        "- Only score objectives from REMAINING OBJECTIVES. The APICall meta must exactly equal one remaining objective text.\n"
+        "- If REMAINING OBJECTIVES is None, set APICall to empty, say the activity is complete, and do not ask another question.\n"
+        "- Never announce a score above the number of LEARNING OBJECTIVES.\n"
         "- Always respond in English.\n"
         "- If you give some options to the student, give them with numbered list instead of bullets.\n"
         "- All the topic related terms and words will be presented as activity. NEVER use topic word for any reason. EXAMPLE: start an activity -> start a topic OR activity_no -> topic_no OR activity text -> topic_text.\n\n"
         f"ACTIVITY TEXT:\n{activity.get('activity_text', '')}\n\n"
         f"LEARNING OBJECTIVES:\n{objectives_text}\n\n"
-        f"CURRENT SCORE: {current_score}"
+        f"ACHIEVED OBJECTIVES:\n{achieved_text}\n\n"
+        f"REMAINING OBJECTIVES:\n{remaining_text}\n\n"
+        f"CURRENT SCORE: {current_score}\n"
+        f"MAX SCORE: {len(learning_objectives)}"
     )
 
     return [{"role": "system", "content": system_prompt}, *history]
@@ -599,8 +721,13 @@ def _extract_log_score_meta(apicall: str) -> str | None:
         return match.group(1).strip()
     return None
 
-def _call_tutoring_llm(activity: dict, history: list[dict[str, str]], current_score: float = 0.0) -> tuple[str, str]:
-    messages = _build_tutoring_llm_messages(activity, history, current_score)
+def _call_tutoring_llm(
+    activity: dict,
+    history: list[dict[str, str]],
+    current_score: float = 0.0,
+    achieved_objectives: list[str] | None = None,
+) -> tuple[str, str]:
+    messages = _build_tutoring_llm_messages(activity, history, current_score, achieved_objectives)
 
     api_key = os.environ.get("OPENROUTER_API_KEY")
     model = os.environ.get("OPENROUTER_MODEL")
@@ -654,7 +781,27 @@ def submitTutoringAnswer(
     course = active_check["course"]
     activity = active_check["activity"]
     history = _load_conversation_history(db, student["id"], course["id"], activity_no)
-    current_score = _get_student_score(db, student["id"], course["id"], activity_no)
+    score_logs = _get_student_score_logs(db, student["id"], course["id"], activity_no)
+    achieved_objectives = _achieved_learning_objectives(activity, score_logs)
+    max_score = len(_learning_objectives(activity))
+    current_score = float(len(achieved_objectives))
+
+    if max_score and current_score >= max_score:
+        response_text = _build_completion_tutoring_response(current_score)
+        if not _is_blank(answer):
+            history.append({"role": "user", "content": str(answer).strip()})
+            history.append({"role": "assistant", "content": response_text})
+            _save_conversation_history(db, student["id"], course["id"], activity_no, history)
+
+        return {
+            "ok": True,
+            "response": response_text,
+            "state": {
+                "student_turns": _student_turn_count(history),
+                "assistant_turns": sum(1 for message in history if message["role"] == "assistant"),
+                "score": current_score,
+            },
+        }
 
     if not history:
         response_text = _build_initial_tutoring_response(activity["activity_text"])
@@ -682,15 +829,23 @@ def submitTutoringAnswer(
         }
 
     history.append({"role": "user", "content": str(answer).strip()})
-    response_text, apicall = _call_tutoring_llm(activity, list(history), current_score)
+    response_text, apicall = _call_tutoring_llm(activity, list(history), current_score, achieved_objectives)
     
     meta = _extract_log_score_meta(apicall)
     if meta:
-        existing_score = db.table("score_logs").select("id").eq("student_id", student["id"]).eq("course_id", course["id"]).eq("activity_no", activity_no).eq("meta", meta).execute()
-        if not existing_score.data:
-            score_result = logScore(email, password, course["course_id"], activity_no, 1.0, meta)
+        objective_meta = _matching_learning_objective(activity, meta)
+        if objective_meta:
+            existing_score = _find_existing_score_log(db, student["id"], course["id"], activity_no, objective_meta)
+        else:
+            existing_score = None
+
+        if objective_meta and not existing_score and current_score < max_score:
+            score_result = logScore(email, password, course["course_id"], activity_no, 1.0, objective_meta)
             if score_result.get("ok") and not score_result.get("duplicate"):
                 current_score += 1.0
+
+    if max_score and current_score >= max_score:
+        response_text = _finalize_completion_response(response_text, current_score)
             
     history.append({"role": "assistant", "content": response_text})
     _save_conversation_history(db, student["id"], course["id"], activity_no, history)
@@ -714,6 +869,7 @@ def logScore(email: str, password: str, course_id: str, activity_no: int, score:
 
     student = active_check["student"]
     course = active_check["course"]
+    activity = active_check["activity"]
 
     if score <= 0:
         return {"ok": False, "error": "Score must be positive"}
@@ -725,16 +881,25 @@ def logScore(email: str, password: str, course_id: str, activity_no: int, score:
         return {"ok": False, "error": "meta is required"}
 
     meta_text = str(meta).strip()
-    existing_score = _find_existing_score_log(db, student["id"], course["id"], activity_no, meta_text)
+    objective_meta = _matching_learning_objective(activity, meta_text)
+    if not objective_meta:
+        return {"ok": False, "error": "meta must match an activity learning objective"}
+
+    score_logs = _get_student_score_logs(db, student["id"], course["id"], activity_no)
+    achieved_objectives = _achieved_learning_objectives(activity, score_logs)
+    existing_score = _find_existing_score_log(db, student["id"], course["id"], activity_no, objective_meta)
     if existing_score:
         return {"ok": True, "score_log": existing_score, "duplicate": True}
+
+    if len(achieved_objectives) >= len(_learning_objectives(activity)):
+        return {"ok": False, "error": "All activity objectives are already scored"}
 
     insert_data = {
         "student_id": student["id"],
         "course_id": course["id"],
         "activity_no": activity_no,
         "score": score,
-        "meta": meta_text
+        "meta": objective_meta
     }
 
     insert_res = db.table("score_logs").insert(insert_data).execute()

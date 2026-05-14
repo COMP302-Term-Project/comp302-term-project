@@ -48,7 +48,7 @@ def test_log_score_success():
             course_id="CS101", 
             activity_no=1, 
             score=1.0, 
-            meta="learned_objective"
+            meta="Hidden instructor objective"
         )
 
     assert response["ok"] is True
@@ -57,13 +57,13 @@ def test_log_score_success():
     assert response["score_log"]["course_id"] == 101
     assert response["score_log"]["activity_no"] == 1
     assert response["score_log"]["score"] == 1.0
-    assert response["score_log"]["meta"] == "learned_objective"
+    assert response["score_log"]["meta"] == "Hidden instructor objective"
     
     # Verify it was inserted in fake_db
     assert len(fake_db.tables["score_logs"]) == 1
     saved_score = fake_db.tables["score_logs"][0]
     assert saved_score["score"] == 1.0
-    assert saved_score["meta"] == "learned_objective"
+    assert saved_score["meta"] == "Hidden instructor objective"
 
 
 def test_log_score_duplicate_meta_returns_existing_score_without_insert():
@@ -74,7 +74,7 @@ def test_log_score_duplicate_meta_returns_existing_score_without_insert():
         "course_id": 101,
         "activity_no": 1,
         "score": 1.0,
-        "meta": "Learned Objective",
+        "meta": "Hidden Instructor Objective",
     }]
 
     with patch("app.services.get_db", return_value=fake_db):
@@ -84,7 +84,7 @@ def test_log_score_duplicate_meta_returns_existing_score_without_insert():
             course_id="CS101",
             activity_no=1,
             score=1.0,
-            meta=" learned   objective ",
+            meta=" hidden   instructor  objective ",
         )
 
     assert response == {"ok": True, "score_log": fake_db.tables["score_logs"][0], "duplicate": True}
@@ -101,7 +101,7 @@ def test_log_score_invalid_score():
             course_id="CS101", 
             activity_no=1, 
             score=-1.0, 
-            meta="learned_objective"
+            meta="Hidden instructor objective"
         )
 
     assert response == {"ok": False, "error": "Score must be positive"}
@@ -118,7 +118,7 @@ def test_log_score_rejects_non_objective_increment():
             course_id="CS101",
             activity_no=1,
             score=2.0,
-            meta="learned_objective"
+            meta="Hidden instructor objective"
         )
 
     assert response == {"ok": False, "error": "Objective score must be exactly 1"}
@@ -140,6 +140,57 @@ def test_log_score_requires_meta():
 
     assert response == {"ok": False, "error": "meta is required"}
     assert len(fake_db.tables["score_logs"]) == 0
+
+
+def test_log_score_rejects_meta_outside_activity_objectives():
+    fake_db = _authorized_student_db(activity_rows=[_activity_row(status="ACTIVE")])
+
+    with patch("app.services.get_db", return_value=fake_db):
+        response = logScore(
+            email="student@test.com",
+            password="secure123",
+            course_id="CS101",
+            activity_no=1,
+            score=1.0,
+            meta="Unrelated extra concept",
+        )
+
+    assert response == {"ok": False, "error": "meta must match an activity learning objective"}
+    assert len(fake_db.tables["score_logs"]) == 0
+
+
+def test_log_score_returns_duplicate_after_objective_is_already_scored():
+    fake_db = _authorized_student_db(
+        activity_rows=[
+            {
+                **_activity_row(status="ACTIVE"),
+                "learning_objectives": ["First objective"],
+            }
+        ]
+    )
+    fake_db.tables["score_logs"] = [
+        {
+            "id": 1,
+            "student_id": 9,
+            "course_id": 101,
+            "activity_no": 1,
+            "score": 1.0,
+            "meta": "First objective",
+        }
+    ]
+
+    with patch("app.services.get_db", return_value=fake_db):
+        response = logScore(
+            email="student@test.com",
+            password="secure123",
+            course_id="CS101",
+            activity_no=1,
+            score=1.0,
+            meta="First objective",
+        )
+
+    assert response == {"ok": True, "score_log": fake_db.tables["score_logs"][0], "duplicate": True}
+    assert len(fake_db.tables["score_logs"]) == 1
 
 
 def test_log_score_inactive_activity():
